@@ -1,11 +1,16 @@
 #include "AttendanceMainWindow.h"
 #include <QApplication>
+#include <QDateTime>
+#include <QDebug>
 #include <QFont>
 #include <QIcon>
 #include <QTextCodec>
+#include <QTextStream>
 #include <qsslsocket.h>
 
-#include<Windows.h>
+#ifdef Q_OS_WIN
+#include <Windows.h>
+#endif
 
 void messageOutput(QtMsgType type, const QMessageLogContext& context, const QString& msg)
 {
@@ -27,7 +32,7 @@ void messageOutput(QtMsgType type, const QMessageLogContext& context, const QStr
         break;
     }
 
-    // Êä³öµ½¿ØÖÆÌ¨
+    // ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ì¨
     QTextStream console(stdout);
     console << QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss.zzz")
         << " " << msg << Qt::endl;
@@ -38,25 +43,27 @@ int main(int argc, char* argv[])
 {
     QApplication app(argc, argv);
 
+#ifdef Q_OS_WIN
     AllocConsole();
     FILE* fp;
     freopen_s(&fp, "CONIN$", "r", stdin);
     freopen_s(&fp, "CONOUT$", "w", stdout);
+#endif
 
-    // °²×°ÈÕÖ¾´¦ÀíÆ÷
+    // ï¿½ï¿½×°ï¿½ï¿½Ö¾ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
     qInstallMessageHandler(messageOutput);
 
     qDebug() << "SSL supported:" << QSslSocket::supportsSsl();
     qDebug() << "OpenSSL version:" << QSslSocket::sslLibraryVersionString();
 
-    // ÉèÖÃÓ¦ÓÃ³ÌÐòÍ¼±ê£¨Èç¹ûÓÐµÄ»°£©
+    // ï¿½ï¿½ï¿½ï¿½Ó¦ï¿½Ã³ï¿½ï¿½ï¿½Í¼ï¿½ê£¨ï¿½ï¿½ï¿½ï¿½ÐµÄ»ï¿½ï¿½ï¿½
      app.setWindowIcon(QIcon(":/Icons/logo.ico"));
-     // ÉèÖÃÓ¦ÓÃ³ÌÐòÐÅÏ¢
+     // ï¿½ï¿½ï¿½ï¿½Ó¦ï¿½Ã³ï¿½ï¿½ï¿½ï¿½ï¿½Ï¢
      app.setApplicationName("AttendanceApp");
      app.setOrganizationName("MyCompany");
 
 
-    // ÉèÖÃÄ¬ÈÏ×ÖÌå
+    // ï¿½ï¿½ï¿½ï¿½Ä¬ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
     QFont font = app.font();
     font.setFamily("Microsoft YaHei");
     font.setPointSize(9);
