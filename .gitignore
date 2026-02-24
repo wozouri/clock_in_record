@@ -51,6 +51,7 @@ ui_*.h
 # 日志和临时文件
 *.log
 *.tmp
+*.lnk
 *~
 .DS_Store
 Thumbs.db
