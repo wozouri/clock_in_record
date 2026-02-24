@@ -1,10 +1,10 @@
 # 自动收集源文件
-file(GLOB_RECURSE APP_SOURCES
+file(GLOB_RECURSE APP_SOURCES CONFIGURE_DEPENDS
     "*.cpp"
     "Utils/*.cpp"
     "Cal/*.cpp"
 )
-file(GLOB_RECURSE APP_HEADERS
+file(GLOB_RECURSE APP_HEADERS CONFIGURE_DEPENDS
     "*.h"
     "Utils/*.h"
     "Cal/*.h"
@@ -14,7 +14,7 @@ file(GLOB_RECURSE APP_HEADERS
 list(FILTER APP_SOURCES EXCLUDE REGEX ".*/UpdateChecker/.*")
 list(FILTER APP_HEADERS EXCLUDE REGEX ".*/UpdateChecker/.*")
 # 收集类型定义头文件
-file(GLOB_RECURSE TYPE_HEADERS "Types/*.h")
+file(GLOB_RECURSE TYPE_HEADERS CONFIGURE_DEPENDS "Types/*.h")
 
 # 资源文件配置
 set(RESOURCE_DIR "${CMAKE_SOURCE_DIR}/resources")
