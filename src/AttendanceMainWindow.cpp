@@ -12,6 +12,13 @@
 #include <QMessageBox>
 #include <QPushButton>
 #include <QFileDialog>
+#include <QFile>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QProcess>
+#include <QSet>
+#include <algorithm>
 
 
 #include <UpdateChecker/GitHubUpdater.h>
@@ -485,7 +492,7 @@ void AttendanceMainWindow::updateMonthlyStatistics() {
             // tableView model 数据映射
             QVariantMap info;
             info["arrivalTime"] = record.arrivalTime.toString("hh:mm");
-            info["departureTime"] = record.departureTime.toString("hh::mm");
+            info["departureTime"] = record.departureTime.toString("hh:mm");
 
 
             m_calendar->setCustomData(date, info);
