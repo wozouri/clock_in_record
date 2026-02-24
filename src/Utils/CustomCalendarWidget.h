@@ -7,7 +7,7 @@
 #include <QAction>
 #include <QDate>
 
-// ×Ô¶¨ÒåÈÕÀú¿Ø¼þ£¬Ö§³ÖÓÒ¼ü²Ëµ¥
+// ï¿½Ô¶ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ø¼ï¿½ï¿½ï¿½Ö§ï¿½ï¿½ï¿½Ò¼ï¿½ï¿½Ëµï¿½
 class CustomCalendarWidget : public QCalendarWidget {
     Q_OBJECT
     QMap<QDate, QVariantMap> m_data;
@@ -15,7 +15,7 @@ public:
     explicit CustomCalendarWidget(QWidget* parent = nullptr);
     void setupEventFilters();
 
-    void paintCell(QPainter* painter, const QRect& rect, const QDate& date) const;
+    void paintCell(QPainter* painter, const QRect& rect, const QDate& date) const override;
 
     void setCustomData(const QDate& date, const QVariantMap& value);
 signals:
@@ -26,9 +26,8 @@ private slots:
 
 private:
     QDate dateAt(const QPoint& pos);
-    QDate getDateFromPosition(const QPoint& pos);
 
-    // tableView µÄ model ²»¿ÉÐÞ¸Ä
+    // tableView for date grid
     QTableView* m_tableView;
 };
 

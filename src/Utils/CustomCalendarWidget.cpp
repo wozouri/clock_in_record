@@ -1,27 +1,22 @@
 #include "CustomCalendarWidget.h"
 #include <QSettings>
 #include <QStyle>
-#include <QApplication>
-#include <qDebug>
 #include <QAbstractItemModel>
 #include <QPainter>
 
 //#include "CustomDateDelegate.h"
 
 CustomCalendarWidget::CustomCalendarWidget(QWidget* parent) : QCalendarWidget(parent), m_tableView(nullptr) {
-    setContextMenuPolicy(Qt::CustomContextMenu);
-    connect(this, &QWidget::customContextMenuRequested, this, [this](const QPoint& pos){
-        showContextMenu(QPoint(pos.x(), pos.y() - 70));  // 实际点击时垂直方向存在偏移
-        });
     setupEventFilters();
 }
 
 void CustomCalendarWidget::setupEventFilters() {
     m_tableView = this->findChild<QTableView*>();
     if (m_tableView) {
-        // 只监听右键，双击用重写的方法处理
-        m_tableView->installEventFilter(this);
-        //m_tableView->setItemDelegate(new DebugDelegate(m_tableView));
+        QWidget* viewport = m_tableView->viewport();
+        viewport->setContextMenuPolicy(Qt::CustomContextMenu);
+        connect(viewport, &QWidget::customContextMenuRequested,
+            this, &CustomCalendarWidget::showContextMenu);
     }
 }
 
@@ -59,21 +54,17 @@ void CustomCalendarWidget::paintCell(QPainter* painter, const QRect& rect, const
 
         painter->restore();
     }
-
-
-
     painter->save();
     QFont font = painter->font();
-    QFontMetrics fm(font);
     font.setPointSize(7);
     painter->setFont(font);
     painter->setPen(QPen(Qt::blue));
 
-    QAbstractItemModel* model = m_tableView->model();
+    const QVariantMap dayData = m_data.value(date);
     QRect eventRectDown = rect.adjusted(2, rect.height() / 2, -2, -2);
-    QRect eventRectUp = rect.adjusted(2, -32, -2, -2);;
-    painter->drawText(eventRectUp, Qt::AlignCenter, m_data[date]["arrivalTime"].toString());
-    painter->drawText(eventRectDown, Qt::AlignCenter, m_data[date]["departureTime"].toString());
+    QRect eventRectUp = rect.adjusted(2, -32, -2, -2);
+    painter->drawText(eventRectUp, Qt::AlignCenter, dayData.value("arrivalTime").toString());
+    painter->drawText(eventRectDown, Qt::AlignCenter, dayData.value("departureTime").toString());
     painter->restore();
 
 }
@@ -105,19 +96,13 @@ void CustomCalendarWidget::showContextMenu(const QPoint& pos) {
     deleteAction->setIcon(style()->standardIcon(QStyle::SP_TrashIcon));
 
     // 显示菜单并处理选择
-    QAction* selectedAction = contextMenu.exec(mapToGlobal(QPoint(pos.x(),pos.y()+70))); // 显示的时候把判断时加的偏移复位
+    QAction* selectedAction = contextMenu.exec(m_tableView->viewport()->mapToGlobal(pos));
     if (selectedAction == deleteAction) {
         emit deleteRequested(clickedDate);
     }
 }
 
 QDate CustomCalendarWidget::dateAt(const QPoint& pos) {
-    // 这是一个简化的实现，在实际使用中可能需要更精确的计算
-    // 使用selectedDate作为近似值
-    return getDateFromPosition(QPoint(pos.x(), pos.y() + 50));
-}
-
-QDate CustomCalendarWidget::getDateFromPosition(const QPoint& pos) {
     if (!m_tableView) {
         return QDate();
     }
@@ -127,22 +112,25 @@ QDate CustomCalendarWidget::getDateFromPosition(const QPoint& pos) {
         return QDate();
     }
 
-    // 获取模型
     QAbstractItemModel* model = m_tableView->model();
     if (!model) {
         return QDate();
     }
 
+    const QVariant dateVariant = model->data(index, Qt::UserRole);
+    if (dateVariant.canConvert<QDate>()) {
+        const QDate roleDate = dateVariant.toDate();
+        if (roleDate.isValid()) {
+            return roleDate;
+        }
+    }
+
     int year = yearShown();
     int month = monthShown();
-    int day = model->data(index, Qt::DisplayRole).toInt();
-    
-    qDebug() << "Can set data?" <<( model->flags(index) & Qt::ItemIsEditable);
-    if (!model->setData(index, 666, Qt::UserRole)) {
-        qDebug() << "XXXXXXXXXXXX";
-    }
-    else {
-        qDebug() << "YYYYYYYYYYYYYY";
+    bool ok = false;
+    int day = model->data(index, Qt::DisplayRole).toInt(&ok);
+    if (!ok) {
+        return QDate();
     }
 
     return QDate(year, month, day);
