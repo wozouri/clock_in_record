@@ -1,13 +1,12 @@
 #include "TimeSettingDialog.h"
 #include "CollapsibleGroupBox.h"
 #include "WorkTimeCalculator.h"
+#include "Data/AttendanceStorage.h"
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QGridLayout>
 #include <QGroupBox>
 #include <QPushButton>
-#include <QSettings>
-#include <qDebug>
 
 TimeSettingDialog::TimeSettingDialog(const QDate& date, QWidget* parent)
     : QDialog(parent), m_date(date) {
@@ -197,41 +196,19 @@ void TimeSettingDialog::setupUI() {
 }
 
 void TimeSettingDialog::loadRecord() {
-    QSettings settings;
-    QString key = m_date.toString("yyyy-MM-dd");
+    const AttendanceRecord record = AttendanceStorage::loadRecord(m_date);
 
-    m_needAverageCalCheckBox->setChecked(
-        settings.value(key + "/needAverageCal", true).toBool());
-    m_arrivalTimeEdit->setTime(QTime::fromString(
-        settings.value(key + "/arrival", "09:00").toString(), "hh:mm"));
-    m_departureTimeEdit->setTime(QTime::fromString(
-        settings.value(key + "/departure", "18:00").toString(), "hh:mm"));
-    m_workStartTimeEdit->setTime(QTime::fromString(
-        settings.value(key + "/workStart", "09:00").toString(), "hh:mm"));
-    m_workEndTimeEdit->setTime(QTime::fromString(
-        settings.value(key + "/workEnd", "18:00").toString(), "hh:mm"));
-    m_lunchBreakStartEdit->setTime(QTime::fromString(
-        settings.value(key + "/lunchStart", "12:30").toString(), "hh:mm"));
-    m_lunchBreakEndEdit->setTime(QTime::fromString(
-        settings.value(key + "/lunchEnd", "13:30").toString(), "hh:mm"));
-    m_dinnerBreakStartEdit->setTime(QTime::fromString(
-        settings.value(key + "/dinnerStart", "18:00").toString(), "hh:mm"));
-    m_dinnerBreakEndEdit->setTime(QTime::fromString(
-        settings.value(key + "/dinnerEnd", "18:30").toString(), "hh:mm"));
+    m_needAverageCalCheckBox->setChecked(record.needAverageCal);
+    m_arrivalTimeEdit->setTime(record.arrivalTime);
+    m_departureTimeEdit->setTime(record.departureTime);
+    m_workStartTimeEdit->setTime(record.workStartTime);
+    m_workEndTimeEdit->setTime(record.workEndTime);
+    m_lunchBreakStartEdit->setTime(record.lunchBreakStart);
+    m_lunchBreakEndEdit->setTime(record.lunchBreakEnd);
+    m_dinnerBreakStartEdit->setTime(record.dinnerBreakStart);
+    m_dinnerBreakEndEdit->setTime(record.dinnerBreakEnd);
 }
 
 void TimeSettingDialog::saveRecord() {
-
-    QSettings settings;
-    QString key = m_date.toString("yyyy-MM-dd");
-
-    settings.setValue(key + "/needAverageCal", m_needAverageCalCheckBox->isChecked());
-    settings.setValue(key + "/arrival", m_arrivalTimeEdit->time().toString("hh:mm"));
-    settings.setValue(key + "/departure", m_departureTimeEdit->time().toString("hh:mm"));
-    settings.setValue(key + "/workStart", m_workStartTimeEdit->time().toString("hh:mm"));
-    settings.setValue(key + "/workEnd", m_workEndTimeEdit->time().toString("hh:mm"));
-    settings.setValue(key + "/lunchStart", m_lunchBreakStartEdit->time().toString("hh:mm"));
-    settings.setValue(key + "/lunchEnd", m_lunchBreakEndEdit->time().toString("hh:mm"));
-    settings.setValue(key + "/dinnerStart", m_dinnerBreakStartEdit->time().toString("hh:mm"));
-    settings.setValue(key + "/dinnerEnd", m_dinnerBreakEndEdit->time().toString("hh:mm"));
+    AttendanceStorage::saveRecord(m_date, getRecord());
 }

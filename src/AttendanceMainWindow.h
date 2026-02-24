@@ -7,6 +7,7 @@
 #include <QMouseEvent>
 
 class CustomCalendarWidget;
+struct MonthlyAttendanceSnapshot;
 
 // 主窗口
 class AttendanceMainWindow : public QMainWindow {
@@ -28,10 +29,11 @@ private slots:
 
 private:
     void setupUI();
+    void refreshMonthlyView();
 
     void deleteAttendanceRecord(const QDate& date);
-    void updateCalendarAppearance();
-    void updateMonthlyStatistics();
+    void updateCalendarAppearance(const MonthlyAttendanceSnapshot& snapshot);
+    void updateMonthlyStatistics(const MonthlyAttendanceSnapshot& snapshot);
 
     void processImportFile(const QString& filePath);
     void processExportFile(const QString& filePath);
