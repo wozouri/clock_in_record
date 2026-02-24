@@ -2,22 +2,45 @@
 #include <QSettings>
 #include <QStyle>
 #include <QAbstractItemModel>
+#include <QContextMenuEvent>
+#include <QEvent>
 #include <QPainter>
+#include <QTimer>
 
 //#include "CustomDateDelegate.h"
 
 CustomCalendarWidget::CustomCalendarWidget(QWidget* parent) : QCalendarWidget(parent), m_tableView(nullptr) {
     setupEventFilters();
+    // QCalendarWidget internals may not be fully ready in ctor.
+    // Retry once in next event loop to ensure right-click binding works.
+    QTimer::singleShot(0, this, &CustomCalendarWidget::setupEventFilters);
 }
 
 void CustomCalendarWidget::setupEventFilters() {
+    if (m_tableView) {
+        return;
+    }
+
     m_tableView = this->findChild<QTableView*>();
     if (m_tableView) {
         QWidget* viewport = m_tableView->viewport();
-        viewport->setContextMenuPolicy(Qt::CustomContextMenu);
-        connect(viewport, &QWidget::customContextMenuRequested,
-            this, &CustomCalendarWidget::showContextMenu);
+        viewport->installEventFilter(this);
     }
+}
+
+bool CustomCalendarWidget::eventFilter(QObject* watched, QEvent* event) {
+    if (m_tableView && watched == m_tableView->viewport() && event->type() == QEvent::ContextMenu) {
+        QContextMenuEvent* contextEvent = static_cast<QContextMenuEvent*>(event);
+        showContextMenu(contextEvent->pos());
+        return true;
+    }
+
+    return QCalendarWidget::eventFilter(watched, event);
+}
+
+void CustomCalendarWidget::showEvent(QShowEvent* event) {
+    QCalendarWidget::showEvent(event);
+    setupEventFilters();
 }
 
 void CustomCalendarWidget::paintCell(QPainter* painter, const QRect& rect, const QDate& date) const

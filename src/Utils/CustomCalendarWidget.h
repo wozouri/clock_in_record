@@ -6,6 +6,7 @@
 #include <QMenu>
 #include <QAction>
 #include <QDate>
+#include <QShowEvent>
 
 // �Զ��������ؼ���֧���Ҽ��˵�
 class CustomCalendarWidget : public QCalendarWidget {
@@ -24,6 +25,10 @@ signals:
 
 private slots:
     void showContextMenu(const QPoint& pos);
+
+protected:
+    bool eventFilter(QObject* watched, QEvent* event) override;
+    void showEvent(QShowEvent* event) override;
 
 private:
     QDate dateAt(const QPoint& pos);
