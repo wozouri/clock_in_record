@@ -28,7 +28,6 @@ private slots:
 
 private:
     void setupUI();
-    void updateCheck();
 
     void deleteAttendanceRecord(const QDate& date);
     void updateCalendarAppearance();

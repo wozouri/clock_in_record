@@ -9,6 +9,10 @@ file(GLOB_RECURSE APP_HEADERS
     "Utils/*.h"
     "Cal/*.h"
 )
+
+# 暂时停用更新模块
+list(FILTER APP_SOURCES EXCLUDE REGEX ".*/UpdateChecker/.*")
+list(FILTER APP_HEADERS EXCLUDE REGEX ".*/UpdateChecker/.*")
 # 收集类型定义头文件
 file(GLOB_RECURSE TYPE_HEADERS "Types/*.h")
 
