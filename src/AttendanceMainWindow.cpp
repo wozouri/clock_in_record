@@ -284,11 +284,10 @@ void AttendanceMainWindow::deleteAttendanceRecords(const QList<QDate>& dates) {
         return;
     }
 
-    if (deletableDates.size() == 1) {
-        const QDate date = deletableDates.first();
+    if (deletableDates.size() > 1) {
         if (QMessageBox::question(this,
-            QString("确认删除"),
-            QString("确定要删除 %1 的考勤记录吗？").arg(date.toString("yyyy-MM-dd")),
+            QString("确认批量删除"),
+            QString("确定要删除选中的 %1 条考勤记录吗？").arg(deletableDates.size()),
             QMessageBox::Yes | QMessageBox::No,
             QMessageBox::No) != QMessageBox::Yes) {
             return;
