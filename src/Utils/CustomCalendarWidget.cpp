@@ -4,12 +4,15 @@
 #include <QAbstractItemModel>
 #include <QContextMenuEvent>
 #include <QEvent>
+#include <QMouseEvent>
 #include <QPainter>
+#include <algorithm>
 #include <QTimer>
 
 //#include "CustomDateDelegate.h"
 
 CustomCalendarWidget::CustomCalendarWidget(QWidget* parent) : QCalendarWidget(parent), m_tableView(nullptr) {
+    setSelectionMode(QCalendarWidget::NoSelection);
     setupEventFilters();
     // QCalendarWidget internals may not be fully ready in ctor.
     // Retry once in next event loop to ensure right-click binding works.
@@ -29,10 +32,36 @@ void CustomCalendarWidget::setupEventFilters() {
 }
 
 bool CustomCalendarWidget::eventFilter(QObject* watched, QEvent* event) {
-    if (m_tableView && watched == m_tableView->viewport() && event->type() == QEvent::ContextMenu) {
-        QContextMenuEvent* contextEvent = static_cast<QContextMenuEvent*>(event);
-        showContextMenu(contextEvent->pos());
-        return true;
+    if (m_tableView && watched == m_tableView->viewport()) {
+        if (event->type() == QEvent::MouseButtonPress) {
+            QMouseEvent* mouseEvent = static_cast<QMouseEvent*>(event);
+            if (mouseEvent->button() == Qt::LeftButton) {
+                const QDate clickedDate = dateAt(mouseEvent->pos());
+                if (clickedDate.isValid()) {
+                    if (mouseEvent->modifiers() & Qt::ControlModifier) {
+                        toggleDateSelection(clickedDate);
+                    }
+                    else {
+                        setSingleSelection(clickedDate);
+                    }
+                }
+            }
+        }
+        else if (event->type() == QEvent::MouseButtonDblClick) {
+            QMouseEvent* mouseEvent = static_cast<QMouseEvent*>(event);
+            if (mouseEvent->button() == Qt::LeftButton) {
+                const QDate clickedDate = dateAt(mouseEvent->pos());
+                if (clickedDate.isValid()) {
+                    setSingleSelection(clickedDate);
+                    emit dateDoubleClicked(clickedDate);
+                }
+            }
+        }
+        else if (event->type() == QEvent::ContextMenu) {
+            QContextMenuEvent* contextEvent = static_cast<QContextMenuEvent*>(event);
+            showContextMenu(contextEvent->pos());
+            return true;
+        }
     }
 
     return QCalendarWidget::eventFilter(watched, event);
@@ -45,16 +74,13 @@ void CustomCalendarWidget::showEvent(QShowEvent* event) {
 
 void CustomCalendarWidget::paintCell(QPainter* painter, const QRect& rect, const QDate& date) const
 {
-    __super::paintCell(painter, rect, date);
+    QCalendarWidget::paintCell(painter, rect, date);
 
-
-
-    if (date == selectedDate())
-    {
+    if (isDateSelected(date)) {
         painter->save();
         painter->setRenderHint(QPainter::Antialiasing);
         painter->setPen(Qt::NoPen);
-        painter->setBrush(QColor(0, 145, 255));
+        painter->setBrush(QColor(0, 145, 255, 215));
 
         painter->drawRoundedRect(rect.x(), rect.y() + 3, rect.width(), rect.height() - 6, 3, 3);
         painter->setPen(QColor(255, 255, 255));
@@ -104,6 +130,72 @@ void CustomCalendarWidget::clearCustomData(const QDate& date)
     updateCell(date);
 }
 
+QList<QDate> CustomCalendarWidget::selectedDates() const
+{
+    QList<QDate> dates = m_selectedDates;
+    std::sort(dates.begin(), dates.end());
+    return dates;
+}
+
+void CustomCalendarWidget::clearSelection()
+{
+    if (m_selectedDates.isEmpty()) {
+        return;
+    }
+
+    const QList<QDate> previousDates = m_selectedDates;
+    m_selectedDates.clear();
+    refreshSelection(previousDates);
+    emit selectionChanged();
+}
+
+void CustomCalendarWidget::setSingleSelection(const QDate& date)
+{
+    QList<QDate> datesToUpdate = m_selectedDates;
+    if (!datesToUpdate.contains(date)) {
+        datesToUpdate.append(date);
+    }
+
+    const bool selectionUnchanged = (m_selectedDates.size() == 1 && m_selectedDates.first() == date);
+    if (selectionUnchanged) {
+        return;
+    }
+
+    m_selectedDates.clear();
+    m_selectedDates.append(date);
+    refreshSelection(datesToUpdate);
+    emit selectionChanged();
+}
+
+void CustomCalendarWidget::toggleDateSelection(const QDate& date)
+{
+    if (!date.isValid()) {
+        return;
+    }
+
+    if (m_selectedDates.contains(date)) {
+        m_selectedDates.removeAll(date);
+    }
+    else {
+        m_selectedDates.append(date);
+    }
+
+    refreshSelection(QList<QDate>{ date });
+    emit selectionChanged();
+}
+
+bool CustomCalendarWidget::isDateSelected(const QDate& date) const
+{
+    return m_selectedDates.contains(date);
+}
+
+void CustomCalendarWidget::refreshSelection(const QList<QDate>& datesToUpdate)
+{
+    for (const QDate& date : datesToUpdate) {
+        updateCell(date);
+    }
+}
+
 
 void CustomCalendarWidget::showContextMenu(const QPoint& pos) {
     // 获取点击位置对应的日期
@@ -112,22 +204,42 @@ void CustomCalendarWidget::showContextMenu(const QPoint& pos) {
         return;
     }
 
-    // 检查该日期是否有记录
+    QList<QDate> targetDates;
+    if (m_selectedDates.size() > 1 && m_selectedDates.contains(clickedDate)) {
+        targetDates = selectedDates();
+    }
+    else {
+        targetDates.append(clickedDate);
+    }
+
+    QList<QDate> deletableDates;
     QSettings settings;
-    QString key = clickedDate.toString("yyyy-MM-dd");
-    if (!settings.contains(key + "/arrival")) {
-        return; // 没有记录，不显示菜单
+    for (const QDate& date : targetDates) {
+        const QString key = date.toString("yyyy-MM-dd");
+        if (settings.contains(key + "/arrival")) {
+            deletableDates.append(date);
+        }
+    }
+
+    if (deletableDates.isEmpty()) {
+        return;
     }
 
     // 创建右键菜单
     QMenu contextMenu(this);
-    QAction* deleteAction = contextMenu.addAction(QString("删除 %1 的记录").arg(clickedDate.toString("yyyy-MM-dd")));
+    QAction* deleteAction = nullptr;
+    if (deletableDates.size() == 1) {
+        deleteAction = contextMenu.addAction(QString("删除 %1 的记录").arg(deletableDates.first().toString("yyyy-MM-dd")));
+    }
+    else {
+        deleteAction = contextMenu.addAction(QString("删除选中的 %1 条记录").arg(deletableDates.size()));
+    }
     deleteAction->setIcon(style()->standardIcon(QStyle::SP_TrashIcon));
 
     // 显示菜单并处理选择
     QAction* selectedAction = contextMenu.exec(m_tableView->viewport()->mapToGlobal(pos));
     if (selectedAction == deleteAction) {
-        emit deleteRequested(clickedDate);
+        emit deleteRequested(deletableDates);
     }
 }
 

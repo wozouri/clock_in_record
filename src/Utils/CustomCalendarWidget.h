@@ -6,6 +6,7 @@
 #include <QMenu>
 #include <QAction>
 #include <QDate>
+#include <QList>
 #include <QShowEvent>
 
 // �Զ��������ؼ���֧���Ҽ��˵�
@@ -18,10 +19,15 @@ public:
 
     void paintCell(QPainter* painter, const QRect& rect, const QDate& date) const override;
 
+    QList<QDate> selectedDates() const;
     void setCustomData(const QDate& date, const QVariantMap& value);
     void clearCustomData(const QDate& date);
+    void clearSelection();
+
 signals:
-    void deleteRequested(const QDate& date);
+    void selectionChanged();
+    void dateDoubleClicked(const QDate& date);
+    void deleteRequested(const QList<QDate>& dates);
 
 private slots:
     void showContextMenu(const QPoint& pos);
@@ -31,10 +37,15 @@ protected:
     void showEvent(QShowEvent* event) override;
 
 private:
+    void setSingleSelection(const QDate& date);
+    void toggleDateSelection(const QDate& date);
+    bool isDateSelected(const QDate& date) const;
+    void refreshSelection(const QList<QDate>& datesToUpdate);
     QDate dateAt(const QPoint& pos);
 
     // tableView for date grid
     QTableView* m_tableView;
+    QList<QDate> m_selectedDates;
 };
 
 #endif // CUSTOMCALENDARWIDGET_H

@@ -13,6 +13,10 @@
 #include <QMessageBox>
 #include <QPushButton>
 #include <QFileDialog>
+#include <QStatusBar>
+#include <QAction>
+#include <QKeySequence>
+#include <algorithm>
 
 AttendanceMainWindow::AttendanceMainWindow(QWidget* parent) : QMainWindow(parent) {
     setWindowTitle(QString("打卡管理系统"));
@@ -30,16 +34,14 @@ void AttendanceMainWindow::mousePressEvent(QMouseEvent* event) {
 
         // 如果点击在日历外，重置选择状态
         if (!calendarRect.contains(calendarPos)) {
-            // 将选择重置为看不见的日期，并将页面调回当前页面，这样看起来像失去焦点
-            m_calendar->setSelectedDate(QDate::currentDate().addDays(365));
-            m_calendar->setCurrentPage(QDate::currentDate().year(), QDate::currentDate().month());
+            m_calendar->clearSelection();
         }
     }
 
     QMainWindow::mousePressEvent(event);
 }
 
-void AttendanceMainWindow::onDateClicked(const QDate& date) {
+void AttendanceMainWindow::onDateDoubleClicked(const QDate& date) {
     TimeSettingDialog dialog(date, this);
     if (dialog.exec() == QDialog::Accepted) {
         refreshMonthlyView();
@@ -50,17 +52,12 @@ void AttendanceMainWindow::onMonthChanged() {
     refreshMonthlyView();
 }
 
-void AttendanceMainWindow::onDeleteRequested(const QDate& date) {
-    // 确认删除
-    int ret = QMessageBox::question(this,
-        QString("确认删除"),
-        QString("确定要删除 %1 的考勤记录吗？").arg(date.toString("yyyy-MM-dd")),
-        QMessageBox::Yes | QMessageBox::No,
-        QMessageBox::No);
+void AttendanceMainWindow::onDeleteRequested(const QList<QDate>& dates) {
+    deleteAttendanceRecords(dates);
+}
 
-    if (ret == QMessageBox::Yes) {
-        deleteAttendanceRecord(date);
-    }
+void AttendanceMainWindow::onDeleteSelectionRequested() {
+    deleteAttendanceRecords(m_calendar->selectedDates());
 }
 
 void AttendanceMainWindow::onImportJsonClicked() {
@@ -99,8 +96,7 @@ void AttendanceMainWindow::processImportFile(const QString& filePath) {
     }
 
     refreshMonthlyView();
-
-    QMessageBox::information(this, "导入成功", QString("已成功导入 %1 条考勤记录！").arg(result.importedCount));
+    showStatusMessage(QString("已导入 %1 条考勤记录").arg(result.importedCount));
 }
 
 void AttendanceMainWindow::processExportFile(const QString& filePath) {
@@ -111,12 +107,11 @@ void AttendanceMainWindow::processExportFile(const QString& filePath) {
     }
 
     if (!result.hasData) {
-        QMessageBox::information(this, "提示", "当前没有任何考勤记录可导出。");
+        showStatusMessage(QString("当前没有任何考勤记录可导出"));
         return;
     }
 
-    QMessageBox::information(this, "导出成功",
-        QString("已成功导出 %1 条记录到:\n%2").arg(result.exportedCount).arg(filePath));
+    showStatusMessage(QString("已导出 %1 条记录到 %2").arg(result.exportedCount).arg(filePath), 5000);
 }
 
 
@@ -170,13 +165,65 @@ void AttendanceMainWindow::setupUI() {
     leftLayout->addWidget(m_calendar);
 
     // 添加使用说明
-    QLabel* helpLabel = new QLabel(QString("使用说明：\n• 左键点击日期设置考勤时间\n• 右键点击有记录的日期可删除记录\n• 点击日历外区域可重置选择状态"));
+    QLabel* helpLabel = new QLabel(QString("使用说明：\n• 单击日期仅选中，双击日期打开编辑弹窗\n• 按住 Ctrl 可多选多个日期\n• 选中单个日期后可按 Ctrl+C 复制设置\n• 选中目标日期后可按 Ctrl+V 批量覆盖\n• 按 Delete 删除当前选中记录，按 Esc 清空选择"));
     helpLabel->setStyleSheet("color: #666; font-size: 12px; padding: 10px; background-color: #f5f5f5; border-radius: 5px;");
     helpLabel->setWordWrap(true);
     leftLayout->addWidget(helpLabel);
 
     // 右侧：统计和管理
     QVBoxLayout* rightLayout = new QVBoxLayout();
+
+    QGroupBox* batchGroup = new QGroupBox(QString("批量设置"));
+    QVBoxLayout* batchLayout = new QVBoxLayout(batchGroup);
+
+    m_selectionLabel = new QLabel(QString("当前未选中日期"));
+    m_selectionLabel->setWordWrap(true);
+    m_selectionLabel->setStyleSheet("padding: 8px; background-color: #f9f9f9; border-radius: 5px;");
+    batchLayout->addWidget(m_selectionLabel);
+
+    m_copyStatusLabel = new QLabel(QString("未复制任何设置"));
+    m_copyStatusLabel->setWordWrap(true);
+    m_copyStatusLabel->setStyleSheet("padding: 8px; background-color: #f9f9f9; border-radius: 5px;");
+    batchLayout->addWidget(m_copyStatusLabel);
+
+    m_copySelectedButton = new QPushButton(QString("复制选中设置"));
+    m_copySelectedButton->setCursor(Qt::PointingHandCursor);
+    connect(m_copySelectedButton, &QPushButton::clicked, this, &AttendanceMainWindow::onCopySelectedClicked);
+    batchLayout->addWidget(m_copySelectedButton);
+
+    m_applyCopiedButton = new QPushButton(QString("覆盖到选中日期"));
+    m_applyCopiedButton->setCursor(Qt::PointingHandCursor);
+    connect(m_applyCopiedButton, &QPushButton::clicked, this, &AttendanceMainWindow::onApplyCopiedClicked);
+    batchLayout->addWidget(m_applyCopiedButton);
+
+    QAction* copyAction = new QAction(this);
+    copyAction->setShortcut(QKeySequence::Copy);
+    copyAction->setShortcutContext(Qt::WidgetWithChildrenShortcut);
+    connect(copyAction, &QAction::triggered, this, &AttendanceMainWindow::onCopySelectedClicked);
+    addAction(copyAction);
+
+    QAction* pasteAction = new QAction(this);
+    pasteAction->setShortcut(QKeySequence::Paste);
+    pasteAction->setShortcutContext(Qt::WidgetWithChildrenShortcut);
+    connect(pasteAction, &QAction::triggered, this, &AttendanceMainWindow::onApplyCopiedClicked);
+    addAction(pasteAction);
+
+    QAction* deleteAction = new QAction(this);
+    deleteAction->setShortcut(QKeySequence(Qt::Key_Delete));
+    deleteAction->setShortcutContext(Qt::WidgetWithChildrenShortcut);
+    connect(deleteAction, &QAction::triggered, this, &AttendanceMainWindow::onDeleteSelectionRequested);
+    addAction(deleteAction);
+
+    QAction* clearSelectionAction = new QAction(this);
+    clearSelectionAction->setShortcut(QKeySequence(Qt::Key_Escape));
+    clearSelectionAction->setShortcutContext(Qt::WidgetWithChildrenShortcut);
+    connect(clearSelectionAction, &QAction::triggered, this, [this]() {
+        m_calendar->clearSelection();
+        showStatusMessage(QString("已清空当前选择"));
+    });
+    addAction(clearSelectionAction);
+
+    rightLayout->addWidget(batchGroup);
 
     // 月度统计
     QGroupBox* statsGroup = new QGroupBox(QString("月度统计"));
@@ -206,24 +253,61 @@ void AttendanceMainWindow::setupUI() {
     mainLayout->addWidget(splitter);
 
     // 连接信号
-    connect(m_calendar, &QCalendarWidget::clicked, this, &AttendanceMainWindow::onDateClicked);
+    connect(m_calendar, &CustomCalendarWidget::dateDoubleClicked, this, &AttendanceMainWindow::onDateDoubleClicked);
+    connect(m_calendar, &CustomCalendarWidget::selectionChanged, this, &AttendanceMainWindow::onSelectionChanged);
     connect(m_calendar, &QCalendarWidget::currentPageChanged,
         this, &AttendanceMainWindow::onMonthChanged);
     connect(m_calendar, &CustomCalendarWidget::deleteRequested,
         this, &AttendanceMainWindow::onDeleteRequested);
 
     refreshMonthlyView();
+    updateBatchActionState();
 }
 
 void AttendanceMainWindow::deleteAttendanceRecord(const QDate& date) {
     AttendanceStorage::deleteRecord(date);
     m_calendar->clearCustomData(date);
+}
+
+void AttendanceMainWindow::deleteAttendanceRecords(const QList<QDate>& dates) {
+    QList<QDate> deletableDates;
+    for (const QDate& date : dates) {
+        if (AttendanceStorage::hasArrivalRecord(date) && !deletableDates.contains(date)) {
+            deletableDates.append(date);
+        }
+    }
+
+    std::sort(deletableDates.begin(), deletableDates.end());
+
+    if (deletableDates.isEmpty()) {
+        showStatusMessage(QString("当前没有可删除的考勤记录"));
+        return;
+    }
+
+    if (deletableDates.size() == 1) {
+        const QDate date = deletableDates.first();
+        if (QMessageBox::question(this,
+            QString("确认删除"),
+            QString("确定要删除 %1 的考勤记录吗？").arg(date.toString("yyyy-MM-dd")),
+            QMessageBox::Yes | QMessageBox::No,
+            QMessageBox::No) != QMessageBox::Yes) {
+            return;
+        }
+    }
+
+    for (const QDate& date : deletableDates) {
+        deleteAttendanceRecord(date);
+    }
+
+    m_calendar->clearSelection();
 
     refreshMonthlyView();
-
-    // 显示删除成功消息
-    QMessageBox::information(this, QString("删除成功"),
-        QString("已成功删除 %1 的考勤记录").arg(date.toString("yyyy-MM-dd")));
+    if (deletableDates.size() == 1) {
+        showStatusMessage(QString("已删除 %1 的考勤记录").arg(deletableDates.first().toString("yyyy-MM-dd")));
+    }
+    else {
+        showStatusMessage(QString("已删除 %1 个日期的考勤记录").arg(deletableDates.size()));
+    }
 }
 
 void AttendanceMainWindow::refreshMonthlyView() {
@@ -232,6 +316,139 @@ void AttendanceMainWindow::refreshMonthlyView() {
 
     updateCalendarAppearance(snapshot);
     updateMonthlyStatistics(snapshot);
+    updateBatchActionState();
+}
+
+void AttendanceMainWindow::onSelectionChanged() {
+    updateBatchActionState();
+}
+
+void AttendanceMainWindow::onCopySelectedClicked() {
+    const QList<QDate> dates = m_calendar->selectedDates();
+    if (dates.size() != 1) {
+        showStatusMessage(QString("请先单独选中一个日期再复制设置"));
+        return;
+    }
+
+    const QDate sourceDate = dates.first();
+    if (!AttendanceStorage::hasArrivalRecord(sourceDate)) {
+        showStatusMessage(QString("%1 还没有已保存的考勤记录")
+            .arg(sourceDate.toString("yyyy-MM-dd")));
+        return;
+    }
+
+    m_copiedRecord = AttendanceStorage::loadRecord(sourceDate);
+    m_copiedFromDate = sourceDate;
+    m_hasCopiedRecord = true;
+
+    updateBatchActionState();
+    showStatusMessage(QString("已复制 %1 的设置").arg(sourceDate.toString("yyyy-MM-dd")));
+}
+
+void AttendanceMainWindow::onApplyCopiedClicked() {
+    if (!m_hasCopiedRecord) {
+        showStatusMessage(QString("请先复制一个日期的设置"));
+        return;
+    }
+
+    QList<QDate> targetDates;
+    QList<QDate> existingRecordDates;
+    const QList<QDate> selectedDates = m_calendar->selectedDates();
+    for (const QDate& date : selectedDates) {
+        if (date != m_copiedFromDate) {
+            targetDates.append(date);
+            if (AttendanceStorage::hasArrivalRecord(date)) {
+                existingRecordDates.append(date);
+            }
+        }
+    }
+
+    if (targetDates.isEmpty()) {
+        showStatusMessage(QString("请重新选择至少一个目标日期"));
+        return;
+    }
+
+    if (!existingRecordDates.isEmpty()) {
+        const int emptyDateCount = targetDates.size() - existingRecordDates.size();
+        QString prompt;
+
+        if (existingRecordDates.size() == 1 && emptyDateCount == 0) {
+            prompt = QString("确定要用 %1 的设置覆盖 %2 吗？")
+                .arg(m_copiedFromDate.toString("yyyy-MM-dd"))
+                .arg(existingRecordDates.first().toString("yyyy-MM-dd"));
+        }
+        else if (emptyDateCount == 0) {
+            prompt = QString("确定要用 %1 的设置覆盖选中的 %2 个已有记录日期吗？")
+                .arg(m_copiedFromDate.toString("yyyy-MM-dd"))
+                .arg(existingRecordDates.size());
+        }
+        else {
+            prompt = QString("选中的 %1 个日期里，有 %2 个已有记录会被覆盖，另外 %3 个空白日期将直接写入。确定继续吗？")
+                .arg(targetDates.size())
+                .arg(existingRecordDates.size())
+                .arg(emptyDateCount);
+        }
+
+        if (QMessageBox::question(this,
+            QString("确认批量覆盖"),
+            prompt,
+            QMessageBox::Yes | QMessageBox::No,
+            QMessageBox::No) != QMessageBox::Yes) {
+            return;
+        }
+    }
+
+    for (const QDate& date : targetDates) {
+        AttendanceStorage::saveRecord(date, m_copiedRecord);
+    }
+
+    refreshMonthlyView();
+    showStatusMessage(QString("已将 %1 的设置应用到 %2 个日期")
+        .arg(m_copiedFromDate.toString("yyyy-MM-dd"))
+        .arg(targetDates.size()));
+}
+
+void AttendanceMainWindow::showStatusMessage(const QString& message, int timeoutMs) {
+    statusBar()->showMessage(message, timeoutMs);
+}
+
+void AttendanceMainWindow::updateBatchActionState() {
+    const QList<QDate> dates = m_calendar->selectedDates();
+    if (dates.isEmpty()) {
+        m_selectionLabel->setText(QString("当前未选中日期"));
+    }
+    else if (dates.size() == 1) {
+        const QDate date = dates.first();
+        const bool hasRecord = AttendanceStorage::hasArrivalRecord(date);
+        m_selectionLabel->setText(QString("当前选中: %1%2")
+            .arg(date.toString("yyyy-MM-dd"))
+            .arg(hasRecord ? QString() : QString(" (无已保存记录)")));
+    }
+    else {
+        m_selectionLabel->setText(QString("当前选中 %1 个日期，可直接批量覆盖。")
+            .arg(dates.size()));
+    }
+
+    if (m_hasCopiedRecord) {
+        m_copyStatusLabel->setText(QString("已复制: %1 的设置")
+            .arg(m_copiedFromDate.toString("yyyy-MM-dd")));
+    }
+    else {
+        m_copyStatusLabel->setText(QString("未复制任何设置"));
+    }
+
+    const bool canCopy = dates.size() == 1 && AttendanceStorage::hasArrivalRecord(dates.first());
+    bool canApply = false;
+    if (m_hasCopiedRecord) {
+        for (const QDate& date : dates) {
+            if (date != m_copiedFromDate) {
+                canApply = true;
+                break;
+            }
+        }
+    }
+    m_copySelectedButton->setEnabled(canCopy);
+    m_applyCopiedButton->setEnabled(canApply);
 }
 
 void AttendanceMainWindow::updateCalendarAppearance(const MonthlyAttendanceSnapshot& snapshot) {
