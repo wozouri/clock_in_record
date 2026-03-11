@@ -20,6 +20,7 @@ public:
     void paintCell(QPainter* painter, const QRect& rect, const QDate& date) const override;
 
     QList<QDate> selectedDates() const;
+    void setSelectedDates(const QList<QDate>& dates);
     void setCustomData(const QDate& date, const QVariantMap& value);
     void clearCustomData(const QDate& date);
     void clearSelection();
@@ -37,6 +38,7 @@ protected:
     void showEvent(QShowEvent* event) override;
 
 private:
+    void selectDateRange(const QDate& start, const QDate& end, bool additive);
     void setSingleSelection(const QDate& date);
     void toggleDateSelection(const QDate& date);
     bool isDateSelected(const QDate& date) const;
@@ -46,6 +48,7 @@ private:
     // tableView for date grid
     QTableView* m_tableView;
     QList<QDate> m_selectedDates;
+    QDate m_selectionAnchorDate;
 };
 
 #endif // CUSTOMCALENDARWIDGET_H

@@ -83,7 +83,6 @@ void TimeSettingDialog::calculateWorkTime() {
 }
 
 void TimeSettingDialog::saveAndClose() {
-    saveRecord();
     accept();
 }
 
@@ -207,8 +206,4 @@ void TimeSettingDialog::loadRecord() {
     m_lunchBreakEndEdit->setTime(record.lunchBreakEnd);
     m_dinnerBreakStartEdit->setTime(record.dinnerBreakStart);
     m_dinnerBreakEndEdit->setTime(record.dinnerBreakEnd);
-}
-
-void TimeSettingDialog::saveRecord() {
-    AttendanceStorage::saveRecord(m_date, getRecord());
 }

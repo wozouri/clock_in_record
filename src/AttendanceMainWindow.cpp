@@ -18,6 +18,20 @@
 #include <QKeySequence>
 #include <algorithm>
 
+namespace {
+bool recordsEqual(const AttendanceRecord& lhs, const AttendanceRecord& rhs) {
+    return lhs.needAverageCal == rhs.needAverageCal
+        && lhs.arrivalTime == rhs.arrivalTime
+        && lhs.departureTime == rhs.departureTime
+        && lhs.workStartTime == rhs.workStartTime
+        && lhs.workEndTime == rhs.workEndTime
+        && lhs.lunchBreakStart == rhs.lunchBreakStart
+        && lhs.lunchBreakEnd == rhs.lunchBreakEnd
+        && lhs.dinnerBreakStart == rhs.dinnerBreakStart
+        && lhs.dinnerBreakEnd == rhs.dinnerBreakEnd;
+}
+}
+
 AttendanceMainWindow::AttendanceMainWindow(QWidget* parent) : QMainWindow(parent) {
     setWindowTitle(QString("打卡管理系统"));
     setMinimumSize(800, 600);
@@ -42,8 +56,24 @@ void AttendanceMainWindow::mousePressEvent(QMouseEvent* event) {
 }
 
 void AttendanceMainWindow::onDateDoubleClicked(const QDate& date) {
+    const AttendanceRecordState beforeState = captureRecordState(date);
     TimeSettingDialog dialog(date, this);
     if (dialog.exec() == QDialog::Accepted) {
+        AttendanceRecordState afterState;
+        afterState.exists = true;
+        afterState.record = dialog.getRecord();
+
+        if (!beforeState.exists || !recordsEqual(beforeState.record, afterState.record)) {
+            applyRecordState(date, afterState);
+
+            AttendanceChange change;
+            change.date = date;
+            change.before = beforeState;
+            change.after = afterState;
+            pushHistoryEntry(QString("编辑日期设置"), QList<AttendanceChange>{ change });
+            showStatusMessage(QString("已保存 %1 的设置").arg(date.toString("yyyy-MM-dd")));
+        }
+
         refreshMonthlyView();
     }
 }
@@ -165,7 +195,7 @@ void AttendanceMainWindow::setupUI() {
     leftLayout->addWidget(m_calendar);
 
     // 添加使用说明
-    QLabel* helpLabel = new QLabel(QString("使用说明：\n• 单击日期仅选中，双击日期打开编辑弹窗\n• 按住 Ctrl 可多选多个日期\n• 选中单个日期后可按 Ctrl+C 复制设置\n• 选中目标日期后可按 Ctrl+V 批量覆盖\n• 按 Delete 删除当前选中记录，按 Esc 清空选择"));
+    QLabel* helpLabel = new QLabel(QString("使用说明：\n• 单击日期仅选中，双击日期打开编辑弹窗\n• 按住 Ctrl 可多选，按住 Shift 可连续选中日期\n• 选中单个日期后可按 Ctrl+C 复制设置\n• 选中目标日期后可按 Ctrl+V 批量覆盖\n• 按 Ctrl+A 选中当前月份全部有记录日期\n• 按 Ctrl+Z 撤销，按 Ctrl+Y 重做\n• 按 Delete 删除当前选中记录，按 Esc 清空选择"));
     helpLabel->setStyleSheet("color: #666; font-size: 12px; padding: 10px; background-color: #f5f5f5; border-radius: 5px;");
     helpLabel->setWordWrap(true);
     leftLayout->addWidget(helpLabel);
@@ -207,6 +237,48 @@ void AttendanceMainWindow::setupUI() {
     pasteAction->setShortcutContext(Qt::WidgetWithChildrenShortcut);
     connect(pasteAction, &QAction::triggered, this, &AttendanceMainWindow::onApplyCopiedClicked);
     addAction(pasteAction);
+
+    QAction* selectAllAction = new QAction(this);
+    selectAllAction->setShortcut(QKeySequence::SelectAll);
+    selectAllAction->setShortcutContext(Qt::WidgetWithChildrenShortcut);
+    connect(selectAllAction, &QAction::triggered, this, &AttendanceMainWindow::onSelectAllCurrentMonthRequested);
+    addAction(selectAllAction);
+
+    m_undoAction = new QAction(this);
+    m_undoAction->setShortcut(QKeySequence::Undo);
+    m_undoAction->setShortcutContext(Qt::WidgetWithChildrenShortcut);
+    connect(m_undoAction, &QAction::triggered, this, [this]() {
+        if (m_undoStack.isEmpty()) {
+            showStatusMessage(QString("当前没有可撤销的操作"));
+            return;
+        }
+
+        const AttendanceHistoryEntry entry = m_undoStack.takeLast();
+        if (applyHistoryEntry(entry, false)) {
+            m_redoStack.append(entry);
+            showStatusMessage(QString("已撤销%1").arg(entry.actionText));
+        }
+        updateUndoRedoActionState();
+    });
+    addAction(m_undoAction);
+
+    m_redoAction = new QAction(this);
+    m_redoAction->setShortcut(QKeySequence::Redo);
+    m_redoAction->setShortcutContext(Qt::WidgetWithChildrenShortcut);
+    connect(m_redoAction, &QAction::triggered, this, [this]() {
+        if (m_redoStack.isEmpty()) {
+            showStatusMessage(QString("当前没有可重做的操作"));
+            return;
+        }
+
+        const AttendanceHistoryEntry entry = m_redoStack.takeLast();
+        if (applyHistoryEntry(entry, true)) {
+            m_undoStack.append(entry);
+            showStatusMessage(QString("已重做%1").arg(entry.actionText));
+        }
+        updateUndoRedoActionState();
+    });
+    addAction(m_redoAction);
 
     QAction* deleteAction = new QAction(this);
     deleteAction->setShortcut(QKeySequence(Qt::Key_Delete));
@@ -262,6 +334,7 @@ void AttendanceMainWindow::setupUI() {
 
     refreshMonthlyView();
     updateBatchActionState();
+    updateUndoRedoActionState();
 }
 
 void AttendanceMainWindow::deleteAttendanceRecord(const QDate& date) {
@@ -271,9 +344,16 @@ void AttendanceMainWindow::deleteAttendanceRecord(const QDate& date) {
 
 void AttendanceMainWindow::deleteAttendanceRecords(const QList<QDate>& dates) {
     QList<QDate> deletableDates;
+    QList<AttendanceChange> changes;
     for (const QDate& date : dates) {
         if (AttendanceStorage::hasArrivalRecord(date) && !deletableDates.contains(date)) {
             deletableDates.append(date);
+
+            AttendanceChange change;
+            change.date = date;
+            change.before = captureRecordState(date);
+            change.after.exists = false;
+            changes.append(change);
         }
     }
 
@@ -297,6 +377,8 @@ void AttendanceMainWindow::deleteAttendanceRecords(const QList<QDate>& dates) {
     for (const QDate& date : deletableDates) {
         deleteAttendanceRecord(date);
     }
+
+    pushHistoryEntry(QString("删除记录"), changes);
 
     m_calendar->clearSelection();
 
@@ -352,13 +434,26 @@ void AttendanceMainWindow::onApplyCopiedClicked() {
 
     QList<QDate> targetDates;
     QList<QDate> existingRecordDates;
+    QList<AttendanceChange> changes;
     const QList<QDate> selectedDates = m_calendar->selectedDates();
     for (const QDate& date : selectedDates) {
         if (date != m_copiedFromDate) {
+            const AttendanceRecordState beforeState = captureRecordState(date);
+            if (beforeState.exists && recordsEqual(beforeState.record, m_copiedRecord)) {
+                continue;
+            }
+
             targetDates.append(date);
-            if (AttendanceStorage::hasArrivalRecord(date)) {
+            if (beforeState.exists) {
                 existingRecordDates.append(date);
             }
+
+            AttendanceChange change;
+            change.date = date;
+            change.before = beforeState;
+            change.after.exists = true;
+            change.after.record = m_copiedRecord;
+            changes.append(change);
         }
     }
 
@@ -401,14 +496,92 @@ void AttendanceMainWindow::onApplyCopiedClicked() {
         AttendanceStorage::saveRecord(date, m_copiedRecord);
     }
 
+    pushHistoryEntry(QString("批量覆盖设置"), changes);
+
     refreshMonthlyView();
     showStatusMessage(QString("已将 %1 的设置应用到 %2 个日期")
         .arg(m_copiedFromDate.toString("yyyy-MM-dd"))
         .arg(targetDates.size()));
 }
 
+void AttendanceMainWindow::onSelectAllCurrentMonthRequested() {
+    QList<QDate> monthDates;
+    const QStringList recordedDateKeys = AttendanceStorage::recordedDates();
+    for (const QString& dateKey : recordedDateKeys) {
+        const QDate date = QDate::fromString(dateKey, "yyyy-MM-dd");
+        if (date.isValid()
+            && date.year() == m_calendar->yearShown()
+            && date.month() == m_calendar->monthShown()) {
+            monthDates.append(date);
+        }
+    }
+
+    if (monthDates.isEmpty()) {
+        showStatusMessage(QString("当前月份没有可选中的已记录日期"));
+        return;
+    }
+
+    m_calendar->setSelectedDates(monthDates);
+    showStatusMessage(QString("已选中当前月份的 %1 个记录日期").arg(monthDates.size()));
+}
+
 void AttendanceMainWindow::showStatusMessage(const QString& message, int timeoutMs) {
     statusBar()->showMessage(message, timeoutMs);
+}
+
+AttendanceMainWindow::AttendanceRecordState AttendanceMainWindow::captureRecordState(const QDate& date) const {
+    AttendanceRecordState state;
+    state.exists = AttendanceStorage::hasArrivalRecord(date);
+    if (state.exists) {
+        state.record = AttendanceStorage::loadRecord(date);
+    }
+    return state;
+}
+
+void AttendanceMainWindow::applyRecordState(const QDate& date, const AttendanceRecordState& state) {
+    if (state.exists) {
+        AttendanceStorage::saveRecord(date, state.record);
+    }
+    else {
+        AttendanceStorage::deleteRecord(date);
+        m_calendar->clearCustomData(date);
+    }
+}
+
+void AttendanceMainWindow::pushHistoryEntry(const QString& actionText, const QList<AttendanceChange>& changes) {
+    if (changes.isEmpty()) {
+        return;
+    }
+
+    AttendanceHistoryEntry entry;
+    entry.actionText = actionText;
+    entry.changes = changes;
+    m_undoStack.append(entry);
+    m_redoStack.clear();
+    updateUndoRedoActionState();
+}
+
+bool AttendanceMainWindow::applyHistoryEntry(const AttendanceHistoryEntry& entry, bool useAfterState) {
+    if (entry.changes.isEmpty()) {
+        return false;
+    }
+
+    for (const AttendanceChange& change : entry.changes) {
+        applyRecordState(change.date, useAfterState ? change.after : change.before);
+    }
+
+    m_calendar->clearSelection();
+    refreshMonthlyView();
+    return true;
+}
+
+void AttendanceMainWindow::updateUndoRedoActionState() {
+    if (m_undoAction) {
+        m_undoAction->setEnabled(!m_undoStack.isEmpty());
+    }
+    if (m_redoAction) {
+        m_redoAction->setEnabled(!m_redoStack.isEmpty());
+    }
 }
 
 void AttendanceMainWindow::updateBatchActionState() {
@@ -424,8 +597,10 @@ void AttendanceMainWindow::updateBatchActionState() {
             .arg(hasRecord ? QString() : QString(" (无已保存记录)")));
     }
     else {
-        m_selectionLabel->setText(QString("当前选中 %1 个日期，可直接批量覆盖。")
-            .arg(dates.size()));
+        m_selectionLabel->setText(QString("当前选中 %1 个日期（%2 ~ %3），可直接批量覆盖。")
+            .arg(dates.size())
+            .arg(dates.first().toString("yyyy-MM-dd"))
+            .arg(dates.last().toString("yyyy-MM-dd")));
     }
 
     if (m_hasCopiedRecord) {

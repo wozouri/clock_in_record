@@ -38,7 +38,12 @@ bool CustomCalendarWidget::eventFilter(QObject* watched, QEvent* event) {
             if (mouseEvent->button() == Qt::LeftButton) {
                 const QDate clickedDate = dateAt(mouseEvent->pos());
                 if (clickedDate.isValid()) {
-                    if (mouseEvent->modifiers() & Qt::ControlModifier) {
+                    if ((mouseEvent->modifiers() & Qt::ShiftModifier) && m_selectionAnchorDate.isValid()) {
+                        selectDateRange(clickedDate,
+                            m_selectionAnchorDate,
+                            mouseEvent->modifiers() & Qt::ControlModifier);
+                    }
+                    else if (mouseEvent->modifiers() & Qt::ControlModifier) {
                         toggleDateSelection(clickedDate);
                     }
                     else {
@@ -137,6 +142,33 @@ QList<QDate> CustomCalendarWidget::selectedDates() const
     return dates;
 }
 
+void CustomCalendarWidget::setSelectedDates(const QList<QDate>& dates)
+{
+    QList<QDate> normalizedDates;
+    for (const QDate& date : dates) {
+        if (date.isValid() && !normalizedDates.contains(date)) {
+            normalizedDates.append(date);
+        }
+    }
+    std::sort(normalizedDates.begin(), normalizedDates.end());
+
+    if (normalizedDates == selectedDates()) {
+        return;
+    }
+
+    QList<QDate> datesToUpdate = m_selectedDates;
+    for (const QDate& date : normalizedDates) {
+        if (!datesToUpdate.contains(date)) {
+            datesToUpdate.append(date);
+        }
+    }
+
+    m_selectedDates = normalizedDates;
+    m_selectionAnchorDate = m_selectedDates.isEmpty() ? QDate() : m_selectedDates.last();
+    refreshSelection(datesToUpdate);
+    emit selectionChanged();
+}
+
 void CustomCalendarWidget::clearSelection()
 {
     if (m_selectedDates.isEmpty()) {
@@ -145,8 +177,33 @@ void CustomCalendarWidget::clearSelection()
 
     const QList<QDate> previousDates = m_selectedDates;
     m_selectedDates.clear();
+    m_selectionAnchorDate = QDate();
     refreshSelection(previousDates);
     emit selectionChanged();
+}
+
+void CustomCalendarWidget::selectDateRange(const QDate& start, const QDate& end, bool additive)
+{
+    if (!start.isValid() || !end.isValid()) {
+        return;
+    }
+
+    QList<QDate> rangeDates;
+    const QDate firstDate = (start <= end) ? start : end;
+    const QDate lastDate = (start <= end) ? end : start;
+    for (QDate date = firstDate; date <= lastDate; date = date.addDays(1)) {
+        rangeDates.append(date);
+    }
+
+    QList<QDate> targetDates = additive ? m_selectedDates : QList<QDate>();
+    for (const QDate& date : rangeDates) {
+        if (!targetDates.contains(date)) {
+            targetDates.append(date);
+        }
+    }
+
+    setSelectedDates(targetDates);
+    m_selectionAnchorDate = end;
 }
 
 void CustomCalendarWidget::setSingleSelection(const QDate& date)
@@ -163,6 +220,7 @@ void CustomCalendarWidget::setSingleSelection(const QDate& date)
 
     m_selectedDates.clear();
     m_selectedDates.append(date);
+    m_selectionAnchorDate = date;
     refreshSelection(datesToUpdate);
     emit selectionChanged();
 }
@@ -175,9 +233,13 @@ void CustomCalendarWidget::toggleDateSelection(const QDate& date)
 
     if (m_selectedDates.contains(date)) {
         m_selectedDates.removeAll(date);
+        if (m_selectionAnchorDate == date) {
+            m_selectionAnchorDate = m_selectedDates.isEmpty() ? QDate() : m_selectedDates.last();
+        }
     }
     else {
         m_selectedDates.append(date);
+        m_selectionAnchorDate = date;
     }
 
     refreshSelection(QList<QDate>{ date });

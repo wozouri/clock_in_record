@@ -10,7 +10,7 @@
 
 class CollapsibleGroupBox;
 
-// Ê±¼äÉèÖÃ¶Ô»°¿ò
+// Ê±ï¿½ï¿½ï¿½ï¿½ï¿½Ã¶Ô»ï¿½ï¿½ï¿½
 class TimeSettingDialog : public QDialog {
     Q_OBJECT
 
@@ -25,7 +25,6 @@ private slots:
 private:
     void setupUI();
     void loadRecord();
-    void saveRecord();
 
     QDate m_date;
     QCheckBox* m_needAverageCalCheckBox;
