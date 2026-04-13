@@ -1,4 +1,4 @@
-# 自动收集源文件
+﻿# 自动收集源文件
 file(GLOB_RECURSE APP_SOURCES CONFIGURE_DEPENDS
     "*.cpp"
     "Utils/*.cpp"
@@ -50,6 +50,7 @@ add_executable(${PROJECT_NAME}
     ${APP_HEADERS}
     ${APP_RESOURCES}
     ${WIN_RESOURCES}  # 添加Windows资源文件
+    ${CMAKE_SOURCE_DIR}/integration/qt/LicenseCheck.cpp
 )
 # 在 add_executable 之后添加
 set_target_properties(${PROJECT_NAME} PROPERTIES
@@ -61,6 +62,7 @@ target_include_directories(${PROJECT_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/Types    # Types目录
     ${CMAKE_CURRENT_SOURCE_DIR}/Utils    # Utils目录
     ${CMAKE_CURRENT_SOURCE_DIR}/Cal      # Cal目录
+    ${CMAKE_SOURCE_DIR}/integration/qt
 )
 
 # 链接Qt库
@@ -68,6 +70,12 @@ target_link_libraries(${PROJECT_NAME}
     Qt${QT_VERSION_MAJOR}::Core
     Qt${QT_VERSION_MAJOR}::Widgets
     Qt${QT_VERSION_MAJOR}::Network
+)
+
+add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_SOURCE_DIR}/integration/qt/license_public.ini.example"
+        "$<TARGET_FILE_DIR:${PROJECT_NAME}>/license_public.ini"
 )
 
 # Windows特定设置

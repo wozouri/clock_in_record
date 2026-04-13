@@ -31,6 +31,26 @@ cmake --build out/build/x64-RelWithDebInfo --config RelWithDebInfo
 - Windows 注册表路径：`HKEY_CURRENT_USER\Software\MyCompany\AttendanceApp`
 - 清理方法：`Win + R` -> `regedit` -> 定位路径 -> 删除 `AttendanceApp`
 
+## License 集成
+
+当前项目已接入 `License_Public` 的最小在线授权流程：
+
+- 启动时会读取 exe 同级目录下的 `license_public.ini`
+- 程序会调用授权服务的 `/api/client/activate`
+- 校验通过后才会进入主界面
+
+`license_public.ini` 示例：
+
+```ini
+[license_public]
+server_base_url=https://localhost:7443
+license_key=YOUR_LICENSE_KEY
+```
+
+集成代码位于：
+
+- `integration/qt/`
+
 ## Git 提交规范
 
 建议使用 Conventional Commits 风格，便于维护历史与生成变更日志：
