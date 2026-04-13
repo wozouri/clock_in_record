@@ -8,6 +8,7 @@ namespace license_public {
 
 struct LicenseCheckRequest {
     QString iniFilePath;
+    QString publicKeyPath;
     QString deviceFingerprint;
     QString machineName;
     QString osName;
@@ -26,6 +27,9 @@ struct LicenseCheckResult {
     QString licenseStatus;
     QString expiresAt;
     QString result;
+    QString payloadJson;
+    QString signatureText;
+    QString signatureAlgorithm;
     QString boundDeviceFingerprint;
     QString errorText;
     QString rawBody;
@@ -41,11 +45,15 @@ public:
                       const QString &iniFilePath = QString());
     static QString defaultDeviceFingerprint();
     static QString defaultIniFilePath();
+    static QString defaultPublicKeyPath();
 
 private:
     static bool loadIniConfig(const QString &iniFilePath, QString &serverBaseUrl, QString &licenseKey, QString &errorMessage);
     static QByteArray buildRequestBody(const LicenseCheckRequest &request, const QString &licenseKey);
     static LicenseCheckResult performCheck(const LicenseCheckRequest &request);
+    static bool verifyAcceptedSignature(const LicenseCheckRequest &request,
+                                        const LicenseCheckResult &result,
+                                        QString &errorMessage);
 };
 
 }  // namespace license_public

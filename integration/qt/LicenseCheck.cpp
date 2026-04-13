@@ -3,6 +3,7 @@
 #include <QCoreApplication>
 #include <QCryptographicHash>
 #include <QEventLoop>
+#include <QFile>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QNetworkAccessManager>
@@ -15,6 +16,11 @@
 #include <QSysInfo>
 #include <QTimer>
 #include <QUrl>
+
+#include <memory>
+#include <openssl/err.h>
+#include <openssl/evp.h>
+#include <openssl/pem.h>
 
 namespace license_public {
 
@@ -81,6 +87,9 @@ LicenseCheckResult buildResponse(QNetworkReply *reply) {
     response.expiresAt = jsonString(data, "expires_at");
     response.result = jsonString(data, "result");
     response.applyCount = jsonInt64(data, "apply_count");
+    response.payloadJson = jsonString(data, "payload_json");
+    response.signatureText = jsonString(data, "signature_text");
+    response.signatureAlgorithm = jsonString(data, "signature_algorithm");
     response.boundDeviceFingerprint = jsonString(data, "bound_device_fingerprint");
     return response;
 }
@@ -107,6 +116,121 @@ QString buildErrorMessage(const LicenseCheckResult &result) {
     return QStringLiteral("license_check_failed");
 }
 
+using BioPtr = std::unique_ptr<BIO, decltype(&BIO_free)>;
+using EvpMdCtxPtr = std::unique_ptr<EVP_MD_CTX, decltype(&EVP_MD_CTX_free)>;
+using EvpPkeyPtr = std::unique_ptr<EVP_PKEY, decltype(&EVP_PKEY_free)>;
+
+QString openSslErrorString() {
+    const unsigned long code = ERR_get_error();
+    if (code == 0) {
+        return QStringLiteral("openssl error");
+    }
+
+    char buffer[256] = {};
+    ERR_error_string_n(code, buffer, sizeof(buffer));
+    return QString::fromLatin1(buffer);
+}
+
+int fromHexNibble(const QChar ch) {
+    if (ch >= QLatin1Char('0') && ch <= QLatin1Char('9')) {
+        return ch.toLatin1() - '0';
+    }
+    if (ch >= QLatin1Char('a') && ch <= QLatin1Char('f')) {
+        return 10 + (ch.toLatin1() - 'a');
+    }
+    if (ch >= QLatin1Char('A') && ch <= QLatin1Char('F')) {
+        return 10 + (ch.toLatin1() - 'A');
+    }
+    return -1;
+}
+
+QByteArray fromHex(const QString &text, QString &errorMessage) {
+    if (text.size() % 2 != 0) {
+        errorMessage = QStringLiteral("invalid signature hex length");
+        return {};
+    }
+
+    QByteArray bytes;
+    bytes.resize(text.size() / 2);
+    for (int index = 0; index < text.size(); index += 2) {
+        const int high = fromHexNibble(text[index]);
+        const int low = fromHexNibble(text[index + 1]);
+        if (high < 0 || low < 0) {
+            errorMessage = QStringLiteral("invalid signature hex character");
+            return {};
+        }
+        bytes[index / 2] = static_cast<char>((high << 4) | low);
+    }
+    return bytes;
+}
+
+bool verifyEd25519Signature(const QString &publicKeyPath,
+                            const QString &payloadJson,
+                            const QString &signatureHex,
+                            QString &errorMessage) {
+    QFile publicKeyFile(publicKeyPath);
+    if (!publicKeyFile.exists()) {
+        errorMessage = QStringLiteral("missing public key file: %1").arg(publicKeyPath);
+        return false;
+    }
+    if (!publicKeyFile.open(QIODevice::ReadOnly)) {
+        errorMessage = QStringLiteral("failed to open public key file: %1").arg(publicKeyPath);
+        return false;
+    }
+
+    const QByteArray publicKeyPem = publicKeyFile.readAll();
+    const QByteArray signature = fromHex(signatureHex, errorMessage);
+    if (signature.isEmpty() && !signatureHex.isEmpty()) {
+        return false;
+    }
+
+    BioPtr bio(BIO_new_mem_buf(publicKeyPem.constData(), static_cast<int>(publicKeyPem.size())), &BIO_free);
+    if (!bio) {
+        errorMessage = QStringLiteral("failed to create BIO for public key");
+        return false;
+    }
+
+    EvpPkeyPtr pkey(PEM_read_bio_PUBKEY(bio.get(), nullptr, nullptr, nullptr), &EVP_PKEY_free);
+    if (!pkey) {
+        errorMessage = QStringLiteral("failed to read Ed25519 public key: %1").arg(openSslErrorString());
+        return false;
+    }
+    if (EVP_PKEY_base_id(pkey.get()) != EVP_PKEY_ED25519) {
+        errorMessage = QStringLiteral("public key is not an Ed25519 key");
+        return false;
+    }
+
+    EvpMdCtxPtr ctx(EVP_MD_CTX_new(), &EVP_MD_CTX_free);
+    if (!ctx) {
+        errorMessage = QStringLiteral("failed to allocate OpenSSL digest context");
+        return false;
+    }
+
+    if (EVP_DigestVerifyInit(ctx.get(), nullptr, nullptr, nullptr, pkey.get()) != 1) {
+        errorMessage = QStringLiteral("failed to initialize Ed25519 verifier: %1").arg(openSslErrorString());
+        return false;
+    }
+
+    const QByteArray payloadBytes = payloadJson.toUtf8();
+    const int verified = EVP_DigestVerify(
+        ctx.get(),
+        reinterpret_cast<const unsigned char *>(signature.constData()),
+        static_cast<size_t>(signature.size()),
+        reinterpret_cast<const unsigned char *>(payloadBytes.constData()),
+        static_cast<size_t>(payloadBytes.size()));
+
+    if (verified == 1) {
+        return true;
+    }
+    if (verified == 0) {
+        errorMessage = QStringLiteral("license signature verification failed");
+        return false;
+    }
+
+    errorMessage = QStringLiteral("license signature verification error: %1").arg(openSslErrorString());
+    return false;
+}
+
 }  // namespace
 
 bool LicenseCheckResult::isAccepted() const {
@@ -119,13 +243,17 @@ bool LicenseCheck::check(const LicenseCheckRequest &request, QString &errorMessa
         *result = response;
     }
 
-    if (response.isAccepted()) {
-        errorMessage.clear();
-        return true;
+    if (!response.isAccepted()) {
+        errorMessage = buildErrorMessage(response);
+        return false;
     }
 
-    errorMessage = buildErrorMessage(response);
-    return false;
+    if (!verifyAcceptedSignature(request, response, errorMessage)) {
+        return false;
+    }
+
+    errorMessage.clear();
+    return true;
 }
 
 bool LicenseCheck::check(QString &errorMessage, LicenseCheckResult *result, const QString &iniFilePath) {
@@ -136,6 +264,10 @@ bool LicenseCheck::check(QString &errorMessage, LicenseCheckResult *result, cons
 
 QString LicenseCheck::defaultIniFilePath() {
     return QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("license_public.ini"));
+}
+
+QString LicenseCheck::defaultPublicKeyPath() {
+    return QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("license_ed25519_public.pem"));
 }
 
 QString LicenseCheck::defaultDeviceFingerprint() {
@@ -246,6 +378,25 @@ LicenseCheckResult LicenseCheck::performCheck(const LicenseCheckRequest &request
 
     reply->deleteLater();
     return response;
+}
+
+bool LicenseCheck::verifyAcceptedSignature(const LicenseCheckRequest &request,
+                                          const LicenseCheckResult &result,
+                                          QString &errorMessage) {
+    if (result.signatureAlgorithm != QLatin1String("Ed25519")) {
+        errorMessage = QStringLiteral("unexpected signature algorithm: %1").arg(result.signatureAlgorithm);
+        return false;
+    }
+    if (result.payloadJson.isEmpty() || result.signatureText.isEmpty()) {
+        errorMessage = QStringLiteral("missing signed license payload in activation response");
+        return false;
+    }
+
+    const QString publicKeyPath = request.publicKeyPath.trimmed().isEmpty()
+        ? defaultPublicKeyPath()
+        : request.publicKeyPath.trimmed();
+
+    return verifyEd25519Signature(publicKeyPath, result.payloadJson, result.signatureText, errorMessage);
 }
 
 }  // namespace license_public

@@ -20,6 +20,12 @@ file(GLOB_RECURSE TYPE_HEADERS CONFIGURE_DEPENDS "Types/*.h")
 set(RESOURCE_DIR "${CMAKE_SOURCE_DIR}/resources")
 set(APP_RESOURCES "${RESOURCE_DIR}/resources.qrc")
 
+if(WIN32 AND EXISTS "D:/vcpkg/installed/x64-windows")
+    list(APPEND CMAKE_PREFIX_PATH "D:/vcpkg/installed/x64-windows")
+    set(OPENSSL_ROOT_DIR "D:/vcpkg/installed/x64-windows")
+endif()
+find_package(OpenSSL REQUIRED)
+
 # Windows特定资源文件处理
 set(WIN_RESOURCES "")
 if(WIN32)
@@ -70,6 +76,7 @@ target_link_libraries(${PROJECT_NAME}
     Qt${QT_VERSION_MAJOR}::Core
     Qt${QT_VERSION_MAJOR}::Widgets
     Qt${QT_VERSION_MAJOR}::Network
+    OpenSSL::Crypto
 )
 
 add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD

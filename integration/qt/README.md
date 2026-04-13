@@ -4,7 +4,7 @@ This folder contains a minimal reusable Qt checker for `License_Public`.
 
 Files:
 
-- `LicenseCheck.h/.cpp`: reads the `license_public.ini` next to the executable and calls `/api/client/activate`
+- `LicenseCheck.h/.cpp`: reads the `license_public.ini` next to the executable, calls `/api/client/activate`, and verifies the Ed25519 signature with a public key
 - `license_public.ini.example`: sample config file
 
 Current model:
@@ -22,3 +22,11 @@ license_key=YOUR_LICENSE_KEY
 ```
 
 By default, `LicenseCheck` resolves this file from `QCoreApplication::applicationDirPath()`, so it follows the executable location instead of the current working directory.
+
+Default public key file:
+
+```text
+license_ed25519_public.pem
+```
+
+By default, `LicenseCheck` also resolves this file from `QCoreApplication::applicationDirPath()`.

@@ -47,6 +47,10 @@ server_base_url=https://localhost:7443
 license_key=YOUR_LICENSE_KEY
 ```
 
+同时还需要把服务端对应的公钥文件放在 exe 同级目录：
+
+- `license_ed25519_public.pem`
+
 集成代码位于：
 
 - `integration/qt/`
