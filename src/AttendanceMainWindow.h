@@ -78,6 +78,7 @@ private:
     QLabel* m_copyStatusLabel = nullptr;
     QPushButton* m_copySelectedButton = nullptr;
     QPushButton* m_applyCopiedButton = nullptr;
+    QPushButton* m_deleteSelectedButton = nullptr;
     QAction* m_undoAction = nullptr;
     QAction* m_redoAction = nullptr;
     AttendanceRecord m_copiedRecord;

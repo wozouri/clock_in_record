@@ -25,12 +25,26 @@ bool recordsEqual(const AttendanceRecord& lhs, const AttendanceRecord& rhs) {
         && lhs.arrivalTime == rhs.arrivalTime
         && lhs.departureTime == rhs.departureTime;
 }
+
+QString recordSummaryHtml(const AttendanceRecord& record) {
+    const QString workdayMarker = record.needAverageCal
+        ? QStringLiteral("<span style='font-size:16px; font-weight:600; color:#238653;'>&#10003;</span>")
+        : QStringLiteral("<span style='font-size:16px; font-weight:600; color:#94a3b8;'>&#9675;</span>");
+    return QString(
+        "<span style='font-size:13px; font-weight:600; color:#1769aa;'>&#8595; %1</span>"
+        "<span style='color:#9ab4ca;'>&nbsp;&nbsp;</span>"
+        "<span style='font-size:13px; font-weight:600; color:#6a54a3;'>&#8593; %2</span>"
+        "<span style='color:#9ab4ca;'>&nbsp;&nbsp;</span>%3")
+        .arg(record.arrivalTime.toString("hh:mm"))
+        .arg(record.departureTime.toString("hh:mm"))
+        .arg(workdayMarker);
+}
 }
 
 AttendanceMainWindow::AttendanceMainWindow(QWidget* parent) : QMainWindow(parent) {
     setWindowTitle(QString("打卡管理系统"));
-    setMinimumSize(800, 600);
-    resize(900, 660);
+    setMinimumSize(1040, 680);
+    resize(1180, 760);
 
     setupUI();
 }
@@ -157,6 +171,8 @@ void AttendanceMainWindow::setupUI() {
     setCentralWidget(centralWidget);
 
     QHBoxLayout* mainLayout = new QHBoxLayout(centralWidget);
+    mainLayout->setContentsMargins(16, 14, 16, 16);
+    mainLayout->setSpacing(0);
 
     // 左侧：日历
     QVBoxLayout* leftLayout = new QVBoxLayout();
@@ -164,15 +180,20 @@ void AttendanceMainWindow::setupUI() {
     QHBoxLayout* headerLayout = new QHBoxLayout();
 
     QLabel* titleLabel = new QLabel(QString("考勤日历"));
-    titleLabel->setAlignment(Qt::AlignCenter);
-    titleLabel->setStyleSheet("font-size: 18px; font-weight: bold; padding: 10px;");
+    titleLabel->setStyleSheet("font-size: 20px; font-weight: bold; padding: 2px 0;");
     headerLayout->addWidget(titleLabel);
+
+    headerLayout->addStretch();
+
+    const QString headerButtonStyle =
+        "QPushButton { border: none; border-radius: 4px; padding: 0 13px; min-height: 32px; }"
+        "QPushButton:hover { background-color: #e8eef4; }";
 
     // [导入按钮]
     QPushButton* importBtn = new QPushButton("导入数据");
     importBtn->setCursor(Qt::PointingHandCursor);
     importBtn->setStyleSheet(
-        "QPushButton { background-color: #4CAF50; color: white; border: none; border-radius: 4px; padding: 6px 12px; }"
+        "QPushButton { background-color: #4CAF50; color: white; border: none; border-radius: 4px; padding: 0 13px; min-height: 32px; }"
         "QPushButton:hover { background-color: #45a049; }"
     );
     connect(importBtn, &QPushButton::clicked, this, &AttendanceMainWindow::onImportJsonClicked);
@@ -181,23 +202,21 @@ void AttendanceMainWindow::setupUI() {
     // [导出按钮]
     QPushButton* exportBtn = new QPushButton("导出数据");
     exportBtn->setCursor(Qt::PointingHandCursor);
-    // 给它一个不同的颜色 (比如蓝色 #2196F3) 以示区分
     exportBtn->setStyleSheet(
-        "QPushButton { background-color: #2196F3; color: white; border: none; border-radius: 4px; padding: 6px 12px; margin-left: 10px; }"
+        "QPushButton { background-color: #2196F3; color: white; border: none; border-radius: 4px; padding: 0 13px; min-height: 32px; }"
         "QPushButton:hover { background-color: #0b7dda; }"
     );
-    // 连接信号
     connect(exportBtn, &QPushButton::clicked, this, &AttendanceMainWindow::onExportJsonClicked);
     headerLayout->addWidget(exportBtn);
 
     QPushButton* scheduleBtn = new QPushButton(QStringLiteral("工作制度"));
     scheduleBtn->setCursor(Qt::PointingHandCursor);
     scheduleBtn->setToolTip(QStringLiteral("设置标准上下班与休息时间"));
+    scheduleBtn->setStyleSheet(headerButtonStyle);
     connect(scheduleBtn, &QPushButton::clicked,
         this, &AttendanceMainWindow::onWorkScheduleSettingsClicked);
     headerLayout->addWidget(scheduleBtn);
-
-    headerLayout->addStretch();
+    headerLayout->setSpacing(8);
 
     leftLayout->addLayout(headerLayout);
 
@@ -207,38 +226,61 @@ void AttendanceMainWindow::setupUI() {
     m_calendar->setFirstDayOfWeek(Qt::Monday);
     m_calendar->setGridVisible(true);
     leftLayout->addWidget(m_calendar);
-
-    // 添加使用说明
-    QLabel* helpLabel = new QLabel(QString("使用说明：\n• 双击日期，仅记录到岗和离岗时间\n• 工作制度可在顶部统一设置\n• 按住 Ctrl 可多选，按住 Shift 可连续选中日期\n• 选中单个日期后可按 Ctrl+C 复制记录\n• 选中目标日期后可按 Ctrl+V 批量覆盖\n• 按 Ctrl+A 选中当前月份全部有记录日期\n• 按 Ctrl+Z 撤销，按 Ctrl+Y 重做\n• 按 Delete 删除当前选中记录，按 Esc 清空选择"));
-    helpLabel->setStyleSheet("color: #666; font-size: 12px; padding: 10px; background-color: #f5f5f5; border-radius: 5px;");
-    helpLabel->setWordWrap(true);
-    leftLayout->addWidget(helpLabel);
+    leftLayout->setSpacing(10);
 
     // 右侧：统计和管理
     QVBoxLayout* rightLayout = new QVBoxLayout();
+    rightLayout->setSpacing(12);
+    rightLayout->setContentsMargins(0, 0, 0, 0);
 
-    QGroupBox* batchGroup = new QGroupBox(QString("批量记录"));
+    QGroupBox* batchGroup = new QGroupBox(QString("日历操作"));
     QVBoxLayout* batchLayout = new QVBoxLayout(batchGroup);
+    batchLayout->setContentsMargins(12, 18, 12, 12);
+    batchLayout->setSpacing(8);
 
-    m_selectionLabel = new QLabel(QString("当前未选中日期"));
+    m_selectionLabel = new QLabel();
     m_selectionLabel->setWordWrap(true);
-    m_selectionLabel->setStyleSheet("padding: 8px; background-color: #f9f9f9; border-radius: 5px;");
+    m_selectionLabel->setTextFormat(Qt::RichText);
+
+    m_copyStatusLabel = new QLabel();
+    m_copyStatusLabel->setWordWrap(true);
+    m_copyStatusLabel->setTextFormat(Qt::RichText);
+    batchLayout->addWidget(m_copyStatusLabel);
     batchLayout->addWidget(m_selectionLabel);
 
-    m_copyStatusLabel = new QLabel(QString("未复制任何记录"));
-    m_copyStatusLabel->setWordWrap(true);
-    m_copyStatusLabel->setStyleSheet("padding: 8px; background-color: #f9f9f9; border-radius: 5px;");
-    batchLayout->addWidget(m_copyStatusLabel);
-
-    m_copySelectedButton = new QPushButton(QString("复制选中记录"));
+    m_copySelectedButton = new QPushButton();
     m_copySelectedButton->setCursor(Qt::PointingHandCursor);
+    m_copySelectedButton->setMinimumHeight(34);
+    m_copySelectedButton->setStyleSheet(
+        "QPushButton { background-color: #ffffff; color: #1769aa; border: 1px solid #8bbce5; border-radius: 4px; padding: 0 10px; }"
+        "QPushButton:hover:enabled { background-color: #eaf4fd; }"
+        "QPushButton:disabled { color: #8b98a5; border-color: #d6dde3; background-color: #f4f6f8; }"
+    );
     connect(m_copySelectedButton, &QPushButton::clicked, this, &AttendanceMainWindow::onCopySelectedClicked);
     batchLayout->addWidget(m_copySelectedButton);
 
-    m_applyCopiedButton = new QPushButton(QString("覆盖选中记录"));
+    m_applyCopiedButton = new QPushButton();
     m_applyCopiedButton->setCursor(Qt::PointingHandCursor);
+    m_applyCopiedButton->setMinimumHeight(34);
+    m_applyCopiedButton->setStyleSheet(
+        "QPushButton { background-color: #1976d2; color: white; border: none; border-radius: 4px; padding: 0 10px; }"
+        "QPushButton:hover:enabled { background-color: #1565c0; }"
+        "QPushButton:disabled { color: #8b98a5; background-color: #e2e7eb; }"
+    );
     connect(m_applyCopiedButton, &QPushButton::clicked, this, &AttendanceMainWindow::onApplyCopiedClicked);
     batchLayout->addWidget(m_applyCopiedButton);
+
+    m_deleteSelectedButton = new QPushButton();
+    m_deleteSelectedButton->setCursor(Qt::PointingHandCursor);
+    m_deleteSelectedButton->setMinimumHeight(34);
+    m_deleteSelectedButton->setStyleSheet(
+        "QPushButton { background-color: #ffffff; color: #c53030; border: 1px solid #e3a2a2; border-radius: 4px; padding: 0 10px; }"
+        "QPushButton:hover:enabled { background-color: #fff1f1; }"
+        "QPushButton:disabled { color: #9aa5b1; border-color: #d6dde3; background-color: #f4f6f8; }"
+    );
+    connect(m_deleteSelectedButton, &QPushButton::clicked,
+        this, &AttendanceMainWindow::onDeleteSelectionRequested);
+    batchLayout->addWidget(m_deleteSelectedButton);
 
     QAction* copyAction = new QAction(this);
     copyAction->setShortcut(QKeySequence::Copy);
@@ -314,9 +356,10 @@ void AttendanceMainWindow::setupUI() {
     // 月度统计
     QGroupBox* statsGroup = new QGroupBox(QString("月度统计"));
     QVBoxLayout* statsLayout = new QVBoxLayout(statsGroup);
+    statsLayout->setContentsMargins(12, 18, 12, 12);
     m_statsLabel = new QLabel(QString("请选择月份查看统计"));
     m_statsLabel->setWordWrap(true);
-    m_statsLabel->setStyleSheet("padding: 10px; background-color: #f9f9f9; border-radius: 5px;");
+    m_statsLabel->setStyleSheet("padding: 4px 2px; color: #374151; line-height: 1.5;");
     statsLayout->addWidget(m_statsLabel);
     rightLayout->addWidget(statsGroup);
     rightLayout->addStretch();
@@ -326,15 +369,18 @@ void AttendanceMainWindow::setupUI() {
 
     QWidget* leftWidget = new QWidget();
     leftWidget->setLayout(leftLayout);
+    leftWidget->setMinimumWidth(680);
 
     QWidget* rightWidget = new QWidget();
     rightWidget->setLayout(rightLayout);
-    rightWidget->setMaximumWidth(350);
+    rightWidget->setMinimumWidth(280);
+    rightWidget->setMaximumWidth(340);
 
     splitter->addWidget(leftWidget);
     splitter->addWidget(rightWidget);
     splitter->setStretchFactor(0, 2);
-    splitter->setStretchFactor(1, 1);
+    splitter->setStretchFactor(1, 0);
+    splitter->setSizes(QList<int>{ 780, 300 });
 
     mainLayout->addWidget(splitter);
 
@@ -601,42 +647,116 @@ void AttendanceMainWindow::updateUndoRedoActionState() {
 void AttendanceMainWindow::updateBatchActionState() {
     const QList<QDate> dates = m_calendar->selectedDates();
     if (dates.isEmpty()) {
-        m_selectionLabel->setText(QString("当前未选中日期"));
+        m_selectionLabel->setVisible(true);
+        m_selectionLabel->setText(
+            QString("<span style='font-size:15px; font-weight:600; color:#64748b;'>未选择日期</span>"));
+        m_selectionLabel->setStyleSheet(
+            "padding: 9px 10px; background-color: #f6f8fa; border: 1px solid #e2e8f0; border-radius: 4px;");
+        m_selectionLabel->setToolTip(QString());
     }
     else if (dates.size() == 1) {
+        m_selectionLabel->setVisible(true);
         const QDate date = dates.first();
         const bool hasRecord = AttendanceStorage::hasArrivalRecord(date);
-        m_selectionLabel->setText(QString("当前选中: %1%2")
-            .arg(date.toString("yyyy-MM-dd"))
-            .arg(hasRecord ? QString() : QString(" (无已保存记录)")));
+        QString recordSummary;
+        if (hasRecord) {
+            const AttendanceRecord record = AttendanceStorage::loadRecord(date);
+            recordSummary = QString("<br>%1").arg(recordSummaryHtml(record));
+            m_selectionLabel->setToolTip(QStringLiteral("向下箭头：到岗时间；向上箭头：离岗时间；勾选：计入工作日统计；空心圆：不计入工作日统计"));
+            m_selectionLabel->setStyleSheet(
+                "padding: 9px 10px; background-color: #edf6ff; border: 1px solid #b8d9f4; border-radius: 4px;");
+        }
+        else {
+            m_selectionLabel->setToolTip(QString());
+            m_selectionLabel->setStyleSheet(
+                "padding: 9px 10px; background-color: #f1f3f5; border: 1px solid #d6dce2; border-radius: 4px;");
+        }
+        m_selectionLabel->setText(QString(
+            "<span style='font-size:15px; font-weight:600; color:%1;'>%2</span>%3")
+            .arg(hasRecord ? QStringLiteral("#1e3a5f") : QStringLiteral("#64748b"))
+            .arg(date.toString("yyyy年M月d日"))
+            .arg(recordSummary));
     }
     else {
-        m_selectionLabel->setText(QString("当前选中 %1 个日期（%2 ~ %3），可直接批量覆盖。")
-            .arg(dates.size())
-            .arg(dates.first().toString("yyyy-MM-dd"))
-            .arg(dates.last().toString("yyyy-MM-dd")));
+        m_selectionLabel->setVisible(true);
+        m_selectionLabel->setText(QString(
+            "<span style='font-size:15px; font-weight:600; color:#1e3a5f;'>已选择 %1 个日期</span>")
+            .arg(dates.size()));
+        m_selectionLabel->setStyleSheet(
+            "padding: 9px 10px; background-color: #edf6ff; border: 1px solid #b8d9f4; border-radius: 4px;");
+        m_selectionLabel->setToolTip(QString());
     }
 
     if (m_hasCopiedRecord) {
-        m_copyStatusLabel->setText(QString("已复制: %1 的记录")
-            .arg(m_copiedFromDate.toString("yyyy-MM-dd")));
+        m_copyStatusLabel->setText(QString(
+            "<span style='font-size:15px; font-weight:600; color:#1f5c40;'>%1</span><br>%2")
+            .arg(m_copiedFromDate.toString("yyyy年M月d日"))
+            .arg(recordSummaryHtml(m_copiedRecord)));
+        m_copyStatusLabel->setStyleSheet(
+            "padding: 9px 10px; background-color: #eefaf3; border: 1px solid #b9e2c9; border-radius: 4px;");
+        m_copyStatusLabel->setToolTip(QStringLiteral("已复制的记录：向下箭头为到岗时间，向上箭头为离岗时间，勾选表示计入工作日统计"));
+        m_copyStatusLabel->setVisible(true);
     }
     else {
-        m_copyStatusLabel->setText(QString("未复制任何记录"));
+        m_copyStatusLabel->setText(
+            QString("<span style='font-size:15px; font-weight:600; color:#64748b;'>未复制记录</span>"));
+        m_copyStatusLabel->setStyleSheet(
+            "padding: 9px 10px; background-color: #f6f8fa; border: 1px solid #e2e8f0; border-radius: 4px;");
+        m_copyStatusLabel->setVisible(true);
+        m_copyStatusLabel->setToolTip(QString());
     }
 
     const bool canCopy = dates.size() == 1 && AttendanceStorage::hasArrivalRecord(dates.first());
     bool canApply = false;
+    int targetCount = 0;
+    int deletableCount = 0;
+    for (const QDate& date : dates) {
+        if (AttendanceStorage::hasArrivalRecord(date)) {
+            ++deletableCount;
+        }
+    }
     if (m_hasCopiedRecord) {
         for (const QDate& date : dates) {
             if (date != m_copiedFromDate) {
                 canApply = true;
-                break;
+                ++targetCount;
             }
         }
     }
     m_copySelectedButton->setEnabled(canCopy);
     m_applyCopiedButton->setEnabled(canApply);
+    m_deleteSelectedButton->setEnabled(deletableCount > 0);
+
+    if (canCopy) {
+        m_copySelectedButton->setText(QString("复制 %1 的记录").arg(dates.first().toString("M月d日")));
+        m_copySelectedButton->setToolTip(QString("将 %1 的记录设为来源").arg(dates.first().toString("yyyy年M月d日")));
+    }
+    else {
+        m_copySelectedButton->setText(QString("复制记录"));
+        m_copySelectedButton->setToolTip(QString());
+    }
+
+    if (canApply) {
+        m_applyCopiedButton->setText(QString("应用至 %1 个已选日期").arg(targetCount));
+        m_applyCopiedButton->setToolTip(QString("用已复制记录覆盖目标日期"));
+    }
+    else if (m_hasCopiedRecord) {
+        m_applyCopiedButton->setText(QString("应用记录"));
+        m_applyCopiedButton->setToolTip(QString());
+    }
+    else {
+        m_applyCopiedButton->setText(QString("应用记录"));
+        m_applyCopiedButton->setToolTip(QString());
+    }
+
+    if (deletableCount > 0) {
+        m_deleteSelectedButton->setText(QString("删除 %1 条记录").arg(deletableCount));
+        m_deleteSelectedButton->setToolTip(QString("删除当前选择中的已有记录"));
+    }
+    else {
+        m_deleteSelectedButton->setText(QString("删除记录"));
+        m_deleteSelectedButton->setToolTip(QString());
+    }
 }
 
 void AttendanceMainWindow::updateCalendarAppearance(const MonthlyAttendanceSnapshot& snapshot) {
