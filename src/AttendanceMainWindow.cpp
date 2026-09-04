@@ -1,6 +1,7 @@
 ﻿#include "AttendanceMainWindow.h"
 #include "Utils/CustomCalendarWidget.h"
 #include "Utils/TimeSettingDialog.h"
+#include "Utils/WorkScheduleDialog.h"
 #include "Data/AttendanceJsonService.h"
 #include "Data/AttendanceStatsService.h"
 #include "Data/AttendanceStorage.h"
@@ -22,13 +23,7 @@ namespace {
 bool recordsEqual(const AttendanceRecord& lhs, const AttendanceRecord& rhs) {
     return lhs.needAverageCal == rhs.needAverageCal
         && lhs.arrivalTime == rhs.arrivalTime
-        && lhs.departureTime == rhs.departureTime
-        && lhs.workStartTime == rhs.workStartTime
-        && lhs.workEndTime == rhs.workEndTime
-        && lhs.lunchBreakStart == rhs.lunchBreakStart
-        && lhs.lunchBreakEnd == rhs.lunchBreakEnd
-        && lhs.dinnerBreakStart == rhs.dinnerBreakStart
-        && lhs.dinnerBreakEnd == rhs.dinnerBreakEnd;
+        && lhs.departureTime == rhs.departureTime;
 }
 }
 
@@ -57,7 +52,7 @@ void AttendanceMainWindow::mousePressEvent(QMouseEvent* event) {
 
 void AttendanceMainWindow::onDateDoubleClicked(const QDate& date) {
     const AttendanceRecordState beforeState = captureRecordState(date);
-    TimeSettingDialog dialog(date, this);
+    TimeSettingDialog dialog(date, AttendanceStorage::loadWorkSchedule(), this);
     if (dialog.exec() == QDialog::Accepted) {
         AttendanceRecordState afterState;
         afterState.exists = true;
@@ -70,8 +65,8 @@ void AttendanceMainWindow::onDateDoubleClicked(const QDate& date) {
             change.date = date;
             change.before = beforeState;
             change.after = afterState;
-            pushHistoryEntry(QString("编辑日期设置"), QList<AttendanceChange>{ change });
-            showStatusMessage(QString("已保存 %1 的设置").arg(date.toString("yyyy-MM-dd")));
+            pushHistoryEntry(QString("编辑考勤记录"), QList<AttendanceChange>{ change });
+            showStatusMessage(QString("已保存 %1 的考勤记录").arg(date.toString("yyyy-MM-dd")));
         }
 
         refreshMonthlyView();
@@ -115,6 +110,18 @@ void AttendanceMainWindow::onExportJsonClicked() {
     if (!fileName.isEmpty()) {
         processExportFile(fileName);
     }
+}
+
+void AttendanceMainWindow::onWorkScheduleSettingsClicked()
+{
+    WorkScheduleDialog dialog(AttendanceStorage::loadWorkSchedule(), this);
+    if (dialog.exec() != QDialog::Accepted) {
+        return;
+    }
+
+    AttendanceStorage::saveWorkSchedule(dialog.workSchedule());
+    refreshMonthlyView();
+    showStatusMessage(QStringLiteral("工作制度已更新"));
 }
 
 
@@ -183,6 +190,13 @@ void AttendanceMainWindow::setupUI() {
     connect(exportBtn, &QPushButton::clicked, this, &AttendanceMainWindow::onExportJsonClicked);
     headerLayout->addWidget(exportBtn);
 
+    QPushButton* scheduleBtn = new QPushButton(QStringLiteral("工作制度"));
+    scheduleBtn->setCursor(Qt::PointingHandCursor);
+    scheduleBtn->setToolTip(QStringLiteral("设置标准上下班与休息时间"));
+    connect(scheduleBtn, &QPushButton::clicked,
+        this, &AttendanceMainWindow::onWorkScheduleSettingsClicked);
+    headerLayout->addWidget(scheduleBtn);
+
     headerLayout->addStretch();
 
     leftLayout->addLayout(headerLayout);
@@ -195,7 +209,7 @@ void AttendanceMainWindow::setupUI() {
     leftLayout->addWidget(m_calendar);
 
     // 添加使用说明
-    QLabel* helpLabel = new QLabel(QString("使用说明：\n• 单击日期仅选中，双击日期打开编辑弹窗\n• 按住 Ctrl 可多选，按住 Shift 可连续选中日期\n• 选中单个日期后可按 Ctrl+C 复制设置\n• 选中目标日期后可按 Ctrl+V 批量覆盖\n• 按 Ctrl+A 选中当前月份全部有记录日期\n• 按 Ctrl+Z 撤销，按 Ctrl+Y 重做\n• 按 Delete 删除当前选中记录，按 Esc 清空选择"));
+    QLabel* helpLabel = new QLabel(QString("使用说明：\n• 双击日期，仅记录到岗和离岗时间\n• 工作制度可在顶部统一设置\n• 按住 Ctrl 可多选，按住 Shift 可连续选中日期\n• 选中单个日期后可按 Ctrl+C 复制记录\n• 选中目标日期后可按 Ctrl+V 批量覆盖\n• 按 Ctrl+A 选中当前月份全部有记录日期\n• 按 Ctrl+Z 撤销，按 Ctrl+Y 重做\n• 按 Delete 删除当前选中记录，按 Esc 清空选择"));
     helpLabel->setStyleSheet("color: #666; font-size: 12px; padding: 10px; background-color: #f5f5f5; border-radius: 5px;");
     helpLabel->setWordWrap(true);
     leftLayout->addWidget(helpLabel);
@@ -203,7 +217,7 @@ void AttendanceMainWindow::setupUI() {
     // 右侧：统计和管理
     QVBoxLayout* rightLayout = new QVBoxLayout();
 
-    QGroupBox* batchGroup = new QGroupBox(QString("批量设置"));
+    QGroupBox* batchGroup = new QGroupBox(QString("批量记录"));
     QVBoxLayout* batchLayout = new QVBoxLayout(batchGroup);
 
     m_selectionLabel = new QLabel(QString("当前未选中日期"));
@@ -211,17 +225,17 @@ void AttendanceMainWindow::setupUI() {
     m_selectionLabel->setStyleSheet("padding: 8px; background-color: #f9f9f9; border-radius: 5px;");
     batchLayout->addWidget(m_selectionLabel);
 
-    m_copyStatusLabel = new QLabel(QString("未复制任何设置"));
+    m_copyStatusLabel = new QLabel(QString("未复制任何记录"));
     m_copyStatusLabel->setWordWrap(true);
     m_copyStatusLabel->setStyleSheet("padding: 8px; background-color: #f9f9f9; border-radius: 5px;");
     batchLayout->addWidget(m_copyStatusLabel);
 
-    m_copySelectedButton = new QPushButton(QString("复制选中设置"));
+    m_copySelectedButton = new QPushButton(QString("复制选中记录"));
     m_copySelectedButton->setCursor(Qt::PointingHandCursor);
     connect(m_copySelectedButton, &QPushButton::clicked, this, &AttendanceMainWindow::onCopySelectedClicked);
     batchLayout->addWidget(m_copySelectedButton);
 
-    m_applyCopiedButton = new QPushButton(QString("覆盖到选中日期"));
+    m_applyCopiedButton = new QPushButton(QString("覆盖选中记录"));
     m_applyCopiedButton->setCursor(Qt::PointingHandCursor);
     connect(m_applyCopiedButton, &QPushButton::clicked, this, &AttendanceMainWindow::onApplyCopiedClicked);
     batchLayout->addWidget(m_applyCopiedButton);
@@ -407,7 +421,7 @@ void AttendanceMainWindow::onSelectionChanged() {
 void AttendanceMainWindow::onCopySelectedClicked() {
     const QList<QDate> dates = m_calendar->selectedDates();
     if (dates.size() != 1) {
-        showStatusMessage(QString("请先单独选中一个日期再复制设置"));
+        showStatusMessage(QString("请先单独选中一个日期再复制记录"));
         return;
     }
 
@@ -423,12 +437,12 @@ void AttendanceMainWindow::onCopySelectedClicked() {
     m_hasCopiedRecord = true;
 
     updateBatchActionState();
-    showStatusMessage(QString("已复制 %1 的设置").arg(sourceDate.toString("yyyy-MM-dd")));
+    showStatusMessage(QString("已复制 %1 的记录").arg(sourceDate.toString("yyyy-MM-dd")));
 }
 
 void AttendanceMainWindow::onApplyCopiedClicked() {
     if (!m_hasCopiedRecord) {
-        showStatusMessage(QString("请先复制一个日期的设置"));
+        showStatusMessage(QString("请先复制一个日期的记录"));
         return;
     }
 
@@ -467,12 +481,12 @@ void AttendanceMainWindow::onApplyCopiedClicked() {
         QString prompt;
 
         if (existingRecordDates.size() == 1 && emptyDateCount == 0) {
-            prompt = QString("确定要用 %1 的设置覆盖 %2 吗？")
+            prompt = QString("确定要用 %1 的记录覆盖 %2 吗？")
                 .arg(m_copiedFromDate.toString("yyyy-MM-dd"))
                 .arg(existingRecordDates.first().toString("yyyy-MM-dd"));
         }
         else if (emptyDateCount == 0) {
-            prompt = QString("确定要用 %1 的设置覆盖选中的 %2 个已有记录日期吗？")
+            prompt = QString("确定要用 %1 的记录覆盖选中的 %2 个已有记录日期吗？")
                 .arg(m_copiedFromDate.toString("yyyy-MM-dd"))
                 .arg(existingRecordDates.size());
         }
@@ -496,10 +510,10 @@ void AttendanceMainWindow::onApplyCopiedClicked() {
         AttendanceStorage::saveRecord(date, m_copiedRecord);
     }
 
-    pushHistoryEntry(QString("批量覆盖设置"), changes);
+    pushHistoryEntry(QString("批量覆盖记录"), changes);
 
     refreshMonthlyView();
-    showStatusMessage(QString("已将 %1 的设置应用到 %2 个日期")
+    showStatusMessage(QString("已将 %1 的记录应用到 %2 个日期")
         .arg(m_copiedFromDate.toString("yyyy-MM-dd"))
         .arg(targetDates.size()));
 }
@@ -604,11 +618,11 @@ void AttendanceMainWindow::updateBatchActionState() {
     }
 
     if (m_hasCopiedRecord) {
-        m_copyStatusLabel->setText(QString("已复制: %1 的设置")
+        m_copyStatusLabel->setText(QString("已复制: %1 的记录")
             .arg(m_copiedFromDate.toString("yyyy-MM-dd")));
     }
     else {
-        m_copyStatusLabel->setText(QString("未复制任何设置"));
+        m_copyStatusLabel->setText(QString("未复制任何记录"));
     }
 
     const bool canCopy = dates.size() == 1 && AttendanceStorage::hasArrivalRecord(dates.first());

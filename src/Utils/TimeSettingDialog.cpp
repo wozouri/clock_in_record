@@ -1,209 +1,152 @@
 #include "TimeSettingDialog.h"
-#include "CollapsibleGroupBox.h"
-#include "WorkTimeCalculator.h"
-#include "Data/AttendanceStorage.h"
-#include <QVBoxLayout>
-#include <QHBoxLayout>
-#include <QGridLayout>
-#include <QGroupBox>
-#include <QPushButton>
 
-TimeSettingDialog::TimeSettingDialog(const QDate& date, QWidget* parent)
-    : QDialog(parent), m_date(date) {
-    setWindowTitle(QString("设置打卡时间 - %1").arg(date.toString("yyyy-MM-dd")));
+#include "Data/AttendanceStorage.h"
+#include "WorkTimeCalculator.h"
+
+#include <QCheckBox>
+#include <QDialogButtonBox>
+#include <QFormLayout>
+#include <QGroupBox>
+#include <QHBoxLayout>
+#include <QLabel>
+#include <QMessageBox>
+#include <QPushButton>
+#include <QStringList>
+#include <QTimeEdit>
+#include <QVBoxLayout>
+
+namespace {
+
+QString formatDuration(int minutes)
+{
+    return QString("%1小时%2分钟").arg(minutes / 60).arg(minutes % 60);
+}
+
+QWidget* timeEditorRow(QTimeEdit* editor, QWidget* parent)
+{
+    auto* row = new QWidget(parent);
+    auto* layout = new QHBoxLayout(row);
+    layout->setContentsMargins(0, 0, 0, 0);
+    layout->addWidget(editor);
+
+    auto* nowButton = new QPushButton(QStringLiteral("现在"), row);
+    nowButton->setToolTip(QStringLiteral("填入当前时间"));
+    QObject::connect(nowButton, &QPushButton::clicked, editor, [editor]() {
+        editor->setTime(QTime::currentTime());
+    });
+    layout->addWidget(nowButton);
+    return row;
+}
+
+}
+
+TimeSettingDialog::TimeSettingDialog(
+    const QDate& date,
+    const WorkSchedule& schedule,
+    QWidget* parent)
+    : QDialog(parent)
+    , m_date(date)
+    , m_schedule(schedule)
+{
+    setWindowTitle(QString("记录考勤 - %1").arg(date.toString("yyyy-MM-dd")));
     setModal(true);
-    resize(450, 400);
+    setMinimumWidth(380);
 
     setupUI();
     loadRecord();
 }
 
-AttendanceRecord TimeSettingDialog::getRecord() const {
+AttendanceRecord TimeSettingDialog::getRecord() const
+{
     AttendanceRecord record;
     record.needAverageCal = m_needAverageCalCheckBox->isChecked();
     record.arrivalTime = m_arrivalTimeEdit->time();
     record.departureTime = m_departureTimeEdit->time();
-    record.workStartTime = m_workStartTimeEdit->time();
-    record.workEndTime = m_workEndTimeEdit->time();
-    record.lunchBreakStart = m_lunchBreakStartEdit->time();
-    record.lunchBreakEnd = m_lunchBreakEndEdit->time();
-    record.dinnerBreakStart = m_dinnerBreakStartEdit->time();
-    record.dinnerBreakEnd = m_dinnerBreakEndEdit->time();
     return record;
 }
 
-void TimeSettingDialog::calculateWorkTime() {
-    AttendanceRecord record = getRecord();
-    WorkTimeResult result = WorkTimeCalculator::calculateWorkTimeResult(record);
+void TimeSettingDialog::calculateWorkTime()
+{
+    const WorkTimeResult result = WorkTimeCalculator::calculateWorkTimeResult(getRecord(), m_schedule);
+    QStringList lines;
+    lines << QString("实际工作：%1").arg(formatDuration(result.actualWorkMinutes));
+    lines << QString("标准工作：%1").arg(formatDuration(result.standardWorkMinutes));
+    lines << QString("休息扣除：%1").arg(formatDuration(result.totalBreakMinutes));
 
-    QString resultText;
-
-    // 显示迟到早退
     if (result.lateMinutes > 0) {
-        resultText += QString("[迟到] %1小时%2分钟\n")
-            .arg(result.lateMinutes / 60)
-            .arg(result.lateMinutes % 60);
+        lines << QString("迟到：%1").arg(formatDuration(result.lateMinutes));
     }
-
     if (result.earlyLeaveMinutes > 0) {
-        resultText += QString("[早退] %1小时%2分钟\n")
-            .arg(result.earlyLeaveMinutes / 60)
-            .arg(result.earlyLeaveMinutes % 60);
+        lines << QString("早退：%1").arg(formatDuration(result.earlyLeaveMinutes));
     }
 
-    // 显示工作时间
-    resultText += QString("[实际工作] %1小时%2分钟\n")
-        .arg(result.actualWorkMinutes / 60)
-        .arg(result.actualWorkMinutes % 60);
-
-    resultText += QString("[标准工作] %1小时%2分钟\n")
-        .arg(result.standardWorkMinutes / 60)
-        .arg(result.standardWorkMinutes % 60);
-
-    resultText += QString("[总休息] %1小时%2分钟\n")
-        .arg(result.totalBreakMinutes / 60)
-        .arg(result.totalBreakMinutes % 60);
-
-    // 显示加班或欠时
-    if (result.overtimeMinutes > 0) {
-        resultText += QString("[加班时间] %1小时%2分钟")
-            .arg(result.overtimeMinutes / 60)
-            .arg(result.overtimeMinutes % 60);
-    }
-    else if (result.overtimeMinutes < 0) {
-        resultText += QString("[欠缺时间] %1小时%2分钟")
-            .arg((-result.overtimeMinutes) / 60)
-            .arg((-result.overtimeMinutes) % 60);
-    }
-    else {
-        resultText += QString("[完成标准时间]");
-    }
-
-    m_resultLabel->setText(resultText);
+    const QString overtimeText = result.overtimeMinutes >= 0
+        ? QString("加班：%1").arg(formatDuration(result.overtimeMinutes))
+        : QString("欠时：%1").arg(formatDuration(-result.overtimeMinutes));
+    lines << overtimeText;
+    m_resultLabel->setText(lines.join('\n'));
 }
 
-void TimeSettingDialog::saveAndClose() {
+void TimeSettingDialog::saveAndClose()
+{
+    if (m_arrivalTimeEdit->time() >= m_departureTimeEdit->time()) {
+        QMessageBox::warning(this, QStringLiteral("无法保存"),
+            QStringLiteral("离岗时间必须晚于到岗时间。"));
+        return;
+    }
+
     accept();
 }
 
-void TimeSettingDialog::setupUI() {
-    QVBoxLayout* mainLayout = new QVBoxLayout(this);
+void TimeSettingDialog::setupUI()
+{
+    auto* mainLayout = new QVBoxLayout(this);
 
-    // 基本时间设置组
-    QGroupBox* basicTimeGroup = new QGroupBox(QString("基本时间"));
-    QGridLayout* basicTimeLayout = new QGridLayout(basicTimeGroup);
+    auto* recordGroup = new QGroupBox(QStringLiteral("当日记录"), this);
+    auto* recordLayout = new QFormLayout(recordGroup);
 
-    basicTimeLayout->addWidget(new QLabel(QString("到达公司时间:")), 0, 0);
-    m_arrivalTimeEdit = new QTimeEdit();
+    m_arrivalTimeEdit = new QTimeEdit(recordGroup);
     m_arrivalTimeEdit->setDisplayFormat("hh:mm");
-    basicTimeLayout->addWidget(m_arrivalTimeEdit, 0, 1);
+    recordLayout->addRow(QStringLiteral("到岗时间："), timeEditorRow(m_arrivalTimeEdit, recordGroup));
 
-    basicTimeLayout->addWidget(new QLabel(QString("离开公司时间:")), 1, 0);
-    m_departureTimeEdit = new QTimeEdit();
+    m_departureTimeEdit = new QTimeEdit(recordGroup);
     m_departureTimeEdit->setDisplayFormat("hh:mm");
-    basicTimeLayout->addWidget(m_departureTimeEdit, 1, 1);
+    recordLayout->addRow(QStringLiteral("离岗时间："), timeEditorRow(m_departureTimeEdit, recordGroup));
 
-    mainLayout->addWidget(basicTimeGroup);
+    m_needAverageCalCheckBox = new QCheckBox(QStringLiteral("计入工作日统计"), recordGroup);
+    recordLayout->addRow(QString(), m_needAverageCalCheckBox);
+    mainLayout->addWidget(recordGroup);
 
-    // 可折叠的详细设置
-    CollapsibleGroupBox* detailsGroup = new CollapsibleGroupBox(QString("详细设置"), this);
-
-    QVBoxLayout* detailsLayout = new QVBoxLayout();
-    // 计入平均加班时间选择框
-    QGroupBox* needAverageGroup = new QGroupBox(QString(""));
-    QGridLayout* needAverageLayout = new QGridLayout(needAverageGroup);
-    m_needAverageCalCheckBox = new QCheckBox("计入平均加班计算：");
-    m_needAverageCalCheckBox->setLayoutDirection(Qt::RightToLeft);
-    m_needAverageCalCheckBox->setChecked(true);
-    needAverageLayout->addWidget(m_needAverageCalCheckBox);
-
-    // 标准工作时间
-    QGroupBox* standardGroup = new QGroupBox(QString("标准工作时间"));
-    QGridLayout* standardLayout = new QGridLayout(standardGroup);
-
-    standardLayout->addWidget(new QLabel(QString("标准上班时间:")), 0, 0);
-    m_workStartTimeEdit = new QTimeEdit();
-    m_workStartTimeEdit->setDisplayFormat("hh:mm");
-    standardLayout->addWidget(m_workStartTimeEdit, 0, 1);
-
-    standardLayout->addWidget(new QLabel(QString("标准下班时间:")), 1, 0);
-    m_workEndTimeEdit = new QTimeEdit();
-    m_workEndTimeEdit->setDisplayFormat("hh:mm");
-    standardLayout->addWidget(m_workEndTimeEdit, 1, 1);
-
-    // 休息时间设置
-    QGroupBox* breakGroup = new QGroupBox(QString("休息时间设置"));
-    QGridLayout* breakLayout = new QGridLayout(breakGroup);
-
-    breakLayout->addWidget(new QLabel(QString("午餐开始时间:")), 0, 0);
-    m_lunchBreakStartEdit = new QTimeEdit();
-    m_lunchBreakStartEdit->setDisplayFormat("hh:mm");
-    breakLayout->addWidget(m_lunchBreakStartEdit, 0, 1);
-
-    breakLayout->addWidget(new QLabel(QString("午餐结束时间:")), 1, 0);
-    m_lunchBreakEndEdit = new QTimeEdit();
-    m_lunchBreakEndEdit->setDisplayFormat("hh:mm");
-    breakLayout->addWidget(m_lunchBreakEndEdit, 1, 1);
-
-    breakLayout->addWidget(new QLabel(QString("晚餐开始时间:")), 2, 0);
-    m_dinnerBreakStartEdit = new QTimeEdit();
-    m_dinnerBreakStartEdit->setDisplayFormat("hh:mm");
-    breakLayout->addWidget(m_dinnerBreakStartEdit, 2, 1);
-
-    breakLayout->addWidget(new QLabel(QString("晚餐结束时间:")), 3, 0);
-    m_dinnerBreakEndEdit = new QTimeEdit();
-    m_dinnerBreakEndEdit->setDisplayFormat("hh:mm");
-    breakLayout->addWidget(m_dinnerBreakEndEdit, 3, 1);
-
-    detailsLayout->addWidget(needAverageGroup);
-    detailsLayout->addWidget(standardGroup);
-    detailsLayout->addWidget(breakGroup);
-    detailsGroup->setContentLayout(detailsLayout);
-
-    // 结果显示
-    QGroupBox* resultGroup = new QGroupBox(QString("计算结果"));
-    QVBoxLayout* resultLayout = new QVBoxLayout(resultGroup);
-    m_resultLabel = new QLabel(QString(""));
+    auto* resultGroup = new QGroupBox(QStringLiteral("自动计算"), this);
+    auto* resultLayout = new QVBoxLayout(resultGroup);
+    m_resultLabel = new QLabel(resultGroup);
     m_resultLabel->setWordWrap(true);
-    m_resultLabel->setStyleSheet("padding: 10px; background-color: #f0f0f0; border-radius: 5px;");
+    m_resultLabel->setStyleSheet("padding: 8px; background-color: #f5f5f5;");
     resultLayout->addWidget(m_resultLabel);
     mainLayout->addWidget(resultGroup);
-    mainLayout->addWidget(detailsGroup);
 
-    // 按钮布局
-    QHBoxLayout* buttonLayout = new QHBoxLayout();
-    QPushButton* saveBtn = new QPushButton(QString("保存"));
-    QPushButton* cancelBtn = new QPushButton(QString("取消"));
+    auto* buttonBox = new QDialogButtonBox(
+        QDialogButtonBox::Save | QDialogButtonBox::Cancel, this);
+    connect(buttonBox, &QDialogButtonBox::accepted, this, &TimeSettingDialog::saveAndClose);
+    connect(buttonBox, &QDialogButtonBox::rejected, this, &QDialog::reject);
+    mainLayout->addWidget(buttonBox);
 
-    connect(saveBtn, &QPushButton::clicked, this, &TimeSettingDialog::saveAndClose);
-    connect(cancelBtn, &QPushButton::clicked, this, &QDialog::reject);
-
-    buttonLayout->addStretch();
-    buttonLayout->addWidget(saveBtn);
-    buttonLayout->addWidget(cancelBtn);
-    mainLayout->addLayout(buttonLayout);
-
-    // 监听时间变化信号，自动更新计算
     connect(m_arrivalTimeEdit, &QTimeEdit::timeChanged, this, &TimeSettingDialog::calculateWorkTime);
     connect(m_departureTimeEdit, &QTimeEdit::timeChanged, this, &TimeSettingDialog::calculateWorkTime);
-    connect(m_workStartTimeEdit, &QTimeEdit::timeChanged, this, &TimeSettingDialog::calculateWorkTime);
-    connect(m_workEndTimeEdit, &QTimeEdit::timeChanged, this, &TimeSettingDialog::calculateWorkTime);
-    connect(m_lunchBreakStartEdit, &QTimeEdit::timeChanged, this, &TimeSettingDialog::calculateWorkTime);
-    connect(m_lunchBreakEndEdit, &QTimeEdit::timeChanged, this, &TimeSettingDialog::calculateWorkTime);
-    connect(m_dinnerBreakStartEdit, &QTimeEdit::timeChanged, this, &TimeSettingDialog::calculateWorkTime);
-    connect(m_dinnerBreakEndEdit, &QTimeEdit::timeChanged, this, &TimeSettingDialog::calculateWorkTime);
 }
 
-void TimeSettingDialog::loadRecord() {
-    const AttendanceRecord record = AttendanceStorage::loadRecord(m_date);
+void TimeSettingDialog::loadRecord()
+{
+    AttendanceRecord record;
+    if (AttendanceStorage::hasArrivalRecord(m_date)) {
+        record = AttendanceStorage::loadRecord(m_date);
+    } else {
+        record.arrivalTime = m_schedule.workStartTime;
+        record.departureTime = m_schedule.workEndTime;
+    }
 
     m_needAverageCalCheckBox->setChecked(record.needAverageCal);
     m_arrivalTimeEdit->setTime(record.arrivalTime);
     m_departureTimeEdit->setTime(record.departureTime);
-    m_workStartTimeEdit->setTime(record.workStartTime);
-    m_workEndTimeEdit->setTime(record.workEndTime);
-    m_lunchBreakStartEdit->setTime(record.lunchBreakStart);
-    m_lunchBreakEndEdit->setTime(record.lunchBreakEnd);
-    m_dinnerBreakStartEdit->setTime(record.dinnerBreakStart);
-    m_dinnerBreakEndEdit->setTime(record.dinnerBreakEnd);
+    calculateWorkTime();
 }

@@ -31,6 +31,7 @@ private slots:
 
     void onImportJsonClicked();
     void onExportJsonClicked();
+    void onWorkScheduleSettingsClicked();
     void onSelectionChanged();
     void onCopySelectedClicked();
     void onApplyCopiedClicked();

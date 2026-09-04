@@ -7,6 +7,32 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 
+namespace {
+
+bool updateTimeIfPresent(const QJsonObject& row, const char* key, QTime& target)
+{
+    if (!row.contains(key)) {
+        return false;
+    }
+
+    const QTime value = QTime::fromString(row.value(key).toString(), "hh:mm");
+    if (!value.isValid()) {
+        return false;
+    }
+
+    target = value;
+    return true;
+}
+
+bool hasValidSchedule(const WorkSchedule& schedule)
+{
+    return schedule.workStartTime < schedule.workEndTime
+        && (!schedule.lunchBreakEnabled || schedule.lunchBreakStart < schedule.lunchBreakEnd)
+        && (!schedule.dinnerBreakEnabled || schedule.dinnerBreakStart < schedule.dinnerBreakEnd);
+}
+
+}
+
 AttendanceImportResult AttendanceJsonService::importFromLarkJson(const QString& filePath) {
     QFile file(filePath);
     if (!file.open(QIODevice::ReadOnly)) {
@@ -20,6 +46,8 @@ AttendanceImportResult AttendanceJsonService::importFromLarkJson(const QString& 
     }
 
     int importedCount = 0;
+    WorkSchedule importedSchedule = AttendanceStorage::loadWorkSchedule();
+    bool hasImportedSchedule = false;
     // Compatible with dates from Python side: yyyy-MM-d and yyyy-MM-dd.
     const QJsonArray rows = doc.array();
     for (const QJsonValue& value : rows) {
@@ -36,7 +64,31 @@ AttendanceImportResult AttendanceJsonService::importFromLarkJson(const QString& 
         }
 
         AttendanceStorage::upsertCheckTimes(date, checkIn, checkOut);
+        hasImportedSchedule = updateTimeIfPresent(row, "workStart", importedSchedule.workStartTime)
+            || hasImportedSchedule;
+        hasImportedSchedule = updateTimeIfPresent(row, "workEnd", importedSchedule.workEndTime)
+            || hasImportedSchedule;
+        hasImportedSchedule = updateTimeIfPresent(row, "lunchStart", importedSchedule.lunchBreakStart)
+            || hasImportedSchedule;
+        hasImportedSchedule = updateTimeIfPresent(row, "lunchEnd", importedSchedule.lunchBreakEnd)
+            || hasImportedSchedule;
+        hasImportedSchedule = updateTimeIfPresent(row, "dinnerStart", importedSchedule.dinnerBreakStart)
+            || hasImportedSchedule;
+        hasImportedSchedule = updateTimeIfPresent(row, "dinnerEnd", importedSchedule.dinnerBreakEnd)
+            || hasImportedSchedule;
+        if (row.value("lunchBreakEnabled").isBool()) {
+            importedSchedule.lunchBreakEnabled = row.value("lunchBreakEnabled").toBool();
+            hasImportedSchedule = true;
+        }
+        if (row.value("dinnerBreakEnabled").isBool()) {
+            importedSchedule.dinnerBreakEnabled = row.value("dinnerBreakEnabled").toBool();
+            hasImportedSchedule = true;
+        }
         importedCount++;
+    }
+
+    if (hasImportedSchedule && hasValidSchedule(importedSchedule)) {
+        AttendanceStorage::saveWorkSchedule(importedSchedule);
     }
 
     return { true, importedCount, QString() };
@@ -49,6 +101,7 @@ AttendanceExportResult AttendanceJsonService::exportToJson(const QString& filePa
     }
 
     QJsonArray rows;
+    const WorkSchedule schedule = AttendanceStorage::loadWorkSchedule();
     for (const QString& dateText : dates) {
         const QDate date = QDate::fromString(dateText, "yyyy-MM-dd");
         const AttendanceRecord record = AttendanceStorage::loadRecord(date);
@@ -57,8 +110,14 @@ AttendanceExportResult AttendanceJsonService::exportToJson(const QString& filePa
         row["date"] = dateText;
         row["check_in"] = record.arrivalTime.toString("hh:mm");
         row["check_out"] = record.departureTime.toString("hh:mm");
-        row["workStart"] = record.workStartTime.toString("hh:mm");
-        row["workEnd"] = record.workEndTime.toString("hh:mm");
+        row["workStart"] = schedule.workStartTime.toString("hh:mm");
+        row["workEnd"] = schedule.workEndTime.toString("hh:mm");
+        row["lunchBreakEnabled"] = schedule.lunchBreakEnabled;
+        row["lunchStart"] = schedule.lunchBreakStart.toString("hh:mm");
+        row["lunchEnd"] = schedule.lunchBreakEnd.toString("hh:mm");
+        row["dinnerBreakEnabled"] = schedule.dinnerBreakEnabled;
+        row["dinnerStart"] = schedule.dinnerBreakStart.toString("hh:mm");
+        row["dinnerEnd"] = schedule.dinnerBreakEnd.toString("hh:mm");
         row["needAverageCal"] = record.needAverageCal;
         rows.append(row);
     }

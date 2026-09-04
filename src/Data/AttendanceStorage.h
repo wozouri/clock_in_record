@@ -8,6 +8,9 @@
 // Centralizes all QSettings access for attendance data.
 class AttendanceStorage {
 public:
+    static WorkSchedule loadWorkSchedule();
+    static void saveWorkSchedule(const WorkSchedule& schedule);
+
     static AttendanceRecord loadRecord(const QDate& date);
     static void saveRecord(const QDate& date, const AttendanceRecord& record);
     static void deleteRecord(const QDate& date);
@@ -15,8 +18,6 @@ public:
     static bool hasArrivalRecord(const QDate& date);
     static QStringList recordedDates();
 
-    // Used by JSON import to write raw check-in/check-out values while
-    // preserving default configuration keys required by calculations.
     static void upsertCheckTimes(const QDate& date, const QString& checkIn, const QString& checkOut);
 
 private:

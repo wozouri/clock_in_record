@@ -6,6 +6,7 @@ MonthlyAttendanceSnapshot AttendanceStatsService::buildMonthlySnapshot(int year,
     MonthlyAttendanceSnapshot snapshot;
     snapshot.year = year;
     snapshot.month = month;
+    const WorkSchedule schedule = AttendanceStorage::loadWorkSchedule();
 
     const QDate startDate(year, month, 1);
     const QDate endDate = startDate.addMonths(1).addDays(-1);
@@ -17,7 +18,7 @@ MonthlyAttendanceSnapshot AttendanceStatsService::buildMonthlySnapshot(int year,
 
         if (dayView.hasRecord) {
             const AttendanceRecord record = AttendanceStorage::loadRecord(date);
-            const WorkTimeResult result = WorkTimeCalculator::calculateWorkTimeResult(record);
+            const WorkTimeResult result = WorkTimeCalculator::calculateWorkTimeResult(record, schedule);
 
             dayView.needAverageCal = record.needAverageCal;
             dayView.arrivalText = record.arrivalTime.toString("hh:mm");

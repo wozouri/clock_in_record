@@ -1,21 +1,19 @@
-#ifndef TIMESETTINGDIALOG_H
-#define TIMESETTINGDIALOG_H
+#pragma once
 
 #include "AttendanceTypes.h"
-#include <QDialog>
-#include <QTimeEdit>
-#include <QLabel>
-#include <QCheckBox>
+
 #include <QDate>
+#include <QDialog>
 
-class CollapsibleGroupBox;
+class QCheckBox;
+class QLabel;
+class QTimeEdit;
 
-// ʱ�����öԻ���
 class TimeSettingDialog : public QDialog {
     Q_OBJECT
 
 public:
-    explicit TimeSettingDialog(const QDate& date, QWidget* parent = nullptr);
+    TimeSettingDialog(const QDate& date, const WorkSchedule& schedule, QWidget* parent = nullptr);
     AttendanceRecord getRecord() const;
 
 private slots:
@@ -27,16 +25,9 @@ private:
     void loadRecord();
 
     QDate m_date;
-    QCheckBox* m_needAverageCalCheckBox;
-    QTimeEdit* m_arrivalTimeEdit;
-    QTimeEdit* m_departureTimeEdit;
-    QTimeEdit* m_workStartTimeEdit;
-    QTimeEdit* m_workEndTimeEdit;
-    QTimeEdit* m_lunchBreakStartEdit;
-    QTimeEdit* m_lunchBreakEndEdit;
-    QTimeEdit* m_dinnerBreakStartEdit;
-    QTimeEdit* m_dinnerBreakEndEdit;
-    QLabel* m_resultLabel;
+    WorkSchedule m_schedule;
+    QCheckBox* m_needAverageCalCheckBox = nullptr;
+    QTimeEdit* m_arrivalTimeEdit = nullptr;
+    QTimeEdit* m_departureTimeEdit = nullptr;
+    QLabel* m_resultLabel = nullptr;
 };
-
-#endif // TIMESETTINGDIALOG_H
