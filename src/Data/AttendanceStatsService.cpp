@@ -23,6 +23,7 @@ MonthlyAttendanceSnapshot AttendanceStatsService::buildMonthlySnapshot(int year,
             dayView.needAverageCal = record.needAverageCal;
             dayView.arrivalText = record.arrivalTime.toString("hh:mm");
             dayView.departureText = record.departureTime.toString("hh:mm");
+            dayView.hasNote = !record.note.trimmed().isEmpty();
 
             snapshot.workDays++;
             if (!record.needAverageCal) {

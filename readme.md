@@ -15,7 +15,7 @@
 环境要求：
 
 - CMake >= 3.16
-- Qt5 或 Qt6（Core、Widgets）
+- Qt5 或 Qt6（Core、Widgets、Sql，需包含 SQLite 驱动）
 - C++17 编译器
 
 示例（Windows）：
@@ -27,10 +27,12 @@ cmake --build out/build/x64-RelWithDebInfo --config RelWithDebInfo
 
 ## 数据存储与清理
 
-本项目使用 `QSettings` 存储数据。
+本项目使用 SQLite 存储数据，不依赖服务端。
 
-- Windows 注册表路径：`HKEY_CURRENT_USER\Software\MyCompany\AttendanceApp`
-- 清理方法：`Win + R` -> `regedit` -> 定位路径 -> 删除 `AttendanceApp`
+- Windows 数据库路径：`%APPDATA%\MyCompany\AttendanceApp\attendance.db`
+- 首次运行 SQLite 版本时，会自动从旧注册表路径
+  `HKEY_CURRENT_USER\Software\MyCompany\AttendanceApp` 导入考勤记录和工作制度；旧数据不会自动删除。
+- 迁移或备份时，在程序关闭后复制 `attendance.db` 即可；也可以继续使用应用内 JSON 导出。
 
 ## Git 提交规范
 

@@ -23,7 +23,8 @@ namespace {
 bool recordsEqual(const AttendanceRecord& lhs, const AttendanceRecord& rhs) {
     return lhs.needAverageCal == rhs.needAverageCal
         && lhs.arrivalTime == rhs.arrivalTime
-        && lhs.departureTime == rhs.departureTime;
+        && lhs.departureTime == rhs.departureTime
+        && lhs.note == rhs.note;
 }
 
 QString recordSummaryHtml(const AttendanceRecord& record) {
@@ -38,6 +39,15 @@ QString recordSummaryHtml(const AttendanceRecord& record) {
         .arg(record.arrivalTime.toString("hh:mm"))
         .arg(record.departureTime.toString("hh:mm"))
         .arg(workdayMarker);
+}
+
+QString recordNoteHtml(const AttendanceRecord& record) {
+    const QString note = record.note.trimmed();
+    if (note.isEmpty()) {
+        return QString();
+    }
+    return QString("<br><span style='font-size:12px; color:#475569;'>%1</span>")
+        .arg(note.toHtmlEscaped().replace('\n', "<br>"));
 }
 }
 
@@ -661,7 +671,7 @@ void AttendanceMainWindow::updateBatchActionState() {
         QString recordSummary;
         if (hasRecord) {
             const AttendanceRecord record = AttendanceStorage::loadRecord(date);
-            recordSummary = QString("<br>%1").arg(recordSummaryHtml(record));
+            recordSummary = QString("<br>%1%2").arg(recordSummaryHtml(record), recordNoteHtml(record));
             m_selectionLabel->setToolTip(QStringLiteral("向下箭头：到岗时间；向上箭头：离岗时间；勾选：计入工作日统计；空心圆：不计入工作日统计"));
             m_selectionLabel->setStyleSheet(
                 "padding: 9px 10px; background-color: #edf6ff; border: 1px solid #b8d9f4; border-radius: 4px;");
@@ -689,9 +699,10 @@ void AttendanceMainWindow::updateBatchActionState() {
 
     if (m_hasCopiedRecord) {
         m_copyStatusLabel->setText(QString(
-            "<span style='font-size:15px; font-weight:600; color:#1f5c40;'>%1</span><br>%2")
+            "<span style='font-size:15px; font-weight:600; color:#1f5c40;'>%1</span><br>%2%3")
             .arg(m_copiedFromDate.toString("yyyy年M月d日"))
-            .arg(recordSummaryHtml(m_copiedRecord)));
+            .arg(recordSummaryHtml(m_copiedRecord))
+            .arg(recordNoteHtml(m_copiedRecord)));
         m_copyStatusLabel->setStyleSheet(
             "padding: 9px 10px; background-color: #eefaf3; border: 1px solid #b9e2c9; border-radius: 4px;");
         m_copyStatusLabel->setToolTip(QStringLiteral("已复制的记录：向下箭头为到岗时间，向上箭头为离岗时间，勾选表示计入工作日统计"));
@@ -792,6 +803,7 @@ void AttendanceMainWindow::updateMonthlyStatistics(const MonthlyAttendanceSnapsh
             QVariantMap info;
             info["arrivalTime"] = dayView.arrivalText;
             info["departureTime"] = dayView.departureText;
+            info["hasNote"] = dayView.hasNote;
             m_calendar->setCustomData(date, info);
         }
     }

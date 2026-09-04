@@ -10,6 +10,7 @@ struct AttendanceDayView {
     bool needAverageCal = true;
     QString arrivalText;
     QString departureText;
+    bool hasNote = false;
 };
 
 struct MonthlyAttendanceSnapshot {

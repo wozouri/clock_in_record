@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QTime>
+#include <QString>
 
 struct WorkSchedule {
     QTime workStartTime = QTime(9, 0);
@@ -17,6 +18,7 @@ struct AttendanceRecord {
     bool needAverageCal = true;
     QTime arrivalTime = QTime(9, 0);
     QTime departureTime = QTime(18, 0);
+    QString note;
 };
 
 struct WorkTimeResult {

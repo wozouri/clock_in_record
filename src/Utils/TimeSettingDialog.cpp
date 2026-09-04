@@ -10,6 +10,7 @@
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QMessageBox>
+#include <QPlainTextEdit>
 #include <QPushButton>
 #include <QStringList>
 #include <QTimeEdit>
@@ -62,6 +63,7 @@ AttendanceRecord TimeSettingDialog::getRecord() const
     record.needAverageCal = m_needAverageCalCheckBox->isChecked();
     record.arrivalTime = m_arrivalTimeEdit->time();
     record.departureTime = m_departureTimeEdit->time();
+    record.note = m_noteEdit->toPlainText().trimmed();
     return record;
 }
 
@@ -115,6 +117,11 @@ void TimeSettingDialog::setupUI()
 
     m_needAverageCalCheckBox = new QCheckBox(QStringLiteral("计入工作日统计"), recordGroup);
     recordLayout->addRow(QString(), m_needAverageCalCheckBox);
+
+    m_noteEdit = new QPlainTextEdit(recordGroup);
+    m_noteEdit->setPlaceholderText(QStringLiteral("备注（可选）"));
+    m_noteEdit->setFixedHeight(68);
+    recordLayout->addRow(QStringLiteral("备注："), m_noteEdit);
     mainLayout->addWidget(recordGroup);
 
     auto* resultGroup = new QGroupBox(QStringLiteral("自动计算"), this);
@@ -148,5 +155,6 @@ void TimeSettingDialog::loadRecord()
     m_needAverageCalCheckBox->setChecked(record.needAverageCal);
     m_arrivalTimeEdit->setTime(record.arrivalTime);
     m_departureTimeEdit->setTime(record.departureTime);
+    m_noteEdit->setPlainText(record.note);
     calculateWorkTime();
 }

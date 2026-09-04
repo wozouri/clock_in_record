@@ -5,7 +5,7 @@
 #include <QDate>
 #include <QStringList>
 
-// Centralizes all QSettings access for attendance data.
+// Centralizes SQLite access for attendance data.
 class AttendanceStorage {
 public:
     static WorkSchedule loadWorkSchedule();

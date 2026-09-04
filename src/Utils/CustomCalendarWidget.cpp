@@ -1,5 +1,5 @@
 #include "CustomCalendarWidget.h"
-#include <QSettings>
+#include "Data/AttendanceStorage.h"
 #include <QStyle>
 #include <QAbstractItemModel>
 #include <QContextMenuEvent>
@@ -119,6 +119,15 @@ void CustomCalendarWidget::paintCell(QPainter* painter, const QRect& rect, const
     painter->drawText(eventRectUp, Qt::AlignCenter, dayData.value("arrivalTime").toString());
     painter->drawText(eventRectDown, Qt::AlignCenter, dayData.value("departureTime").toString());
     painter->restore();
+
+    if (dayData.value("hasNote").toBool()) {
+        painter->save();
+        painter->setRenderHint(QPainter::Antialiasing);
+        painter->setPen(Qt::NoPen);
+        painter->setBrush(QColor("#f59e0b"));
+        painter->drawEllipse(QPoint(rect.right() - 8, rect.top() + 8), 3, 3);
+        painter->restore();
+    }
 
 }
 
@@ -274,10 +283,8 @@ void CustomCalendarWidget::showContextMenu(const QPoint& pos) {
     }
 
     QList<QDate> deletableDates;
-    QSettings settings;
     for (const QDate& date : targetDates) {
-        const QString key = date.toString("yyyy-MM-dd");
-        if (settings.contains(key + "/arrival")) {
+        if (AttendanceStorage::hasArrivalRecord(date)) {
             deletableDates.append(date);
         }
     }

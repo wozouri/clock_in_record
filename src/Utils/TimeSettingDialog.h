@@ -7,6 +7,7 @@
 
 class QCheckBox;
 class QLabel;
+class QPlainTextEdit;
 class QTimeEdit;
 
 class TimeSettingDialog : public QDialog {
@@ -29,5 +30,6 @@ private:
     QCheckBox* m_needAverageCalCheckBox = nullptr;
     QTimeEdit* m_arrivalTimeEdit = nullptr;
     QTimeEdit* m_departureTimeEdit = nullptr;
+    QPlainTextEdit* m_noteEdit = nullptr;
     QLabel* m_resultLabel = nullptr;
 };

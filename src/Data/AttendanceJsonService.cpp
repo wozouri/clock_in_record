@@ -64,6 +64,11 @@ AttendanceImportResult AttendanceJsonService::importFromLarkJson(const QString& 
         }
 
         AttendanceStorage::upsertCheckTimes(date, checkIn, checkOut);
+        if (row.value("note").isString()) {
+            AttendanceRecord record = AttendanceStorage::loadRecord(date);
+            record.note = row.value("note").toString();
+            AttendanceStorage::saveRecord(date, record);
+        }
         hasImportedSchedule = updateTimeIfPresent(row, "workStart", importedSchedule.workStartTime)
             || hasImportedSchedule;
         hasImportedSchedule = updateTimeIfPresent(row, "workEnd", importedSchedule.workEndTime)
@@ -119,6 +124,9 @@ AttendanceExportResult AttendanceJsonService::exportToJson(const QString& filePa
         row["dinnerStart"] = schedule.dinnerBreakStart.toString("hh:mm");
         row["dinnerEnd"] = schedule.dinnerBreakEnd.toString("hh:mm");
         row["needAverageCal"] = record.needAverageCal;
+        if (!record.note.isEmpty()) {
+            row["note"] = record.note;
+        }
         rows.append(row);
     }
 
