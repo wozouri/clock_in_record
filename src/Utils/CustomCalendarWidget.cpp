@@ -9,7 +9,6 @@
 #include <algorithm>
 #include <QTimer>
 
-//#include "CustomDateDelegate.h"
 
 CustomCalendarWidget::CustomCalendarWidget(QWidget* parent) : QCalendarWidget(parent), m_tableView(nullptr) {
     setSelectionMode(QCalendarWidget::NoSelection);

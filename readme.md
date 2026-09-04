@@ -14,7 +14,7 @@
 环境要求：
 
 - CMake >= 3.16
-- Qt5 或 Qt6（Core、Widgets、Network）
+- Qt5 或 Qt6（Core、Widgets）
 - C++17 编译器
 
 示例（Windows）：
@@ -30,30 +30,6 @@ cmake --build out/build/x64-RelWithDebInfo --config RelWithDebInfo
 
 - Windows 注册表路径：`HKEY_CURRENT_USER\Software\MyCompany\AttendanceApp`
 - 清理方法：`Win + R` -> `regedit` -> 定位路径 -> 删除 `AttendanceApp`
-
-## License 集成
-
-当前项目已接入 `License_Public` 的最小在线授权流程：
-
-- 启动时会读取 exe 同级目录下的 `license_public.ini`
-- 程序会调用授权服务的 `/api/client/activate`
-- 校验通过后才会进入主界面
-
-`license_public.ini` 示例：
-
-```ini
-[license_public]
-server_base_url=https://localhost:7443
-license_key=YOUR_LICENSE_KEY
-```
-
-同时还需要把服务端对应的公钥文件放在 exe 同级目录：
-
-- `license_ed25519_public.pem`
-
-集成代码位于：
-
-- `integration/qt/`
 
 ## Git 提交规范
 
