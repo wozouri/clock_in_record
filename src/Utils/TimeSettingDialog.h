@@ -1,16 +1,16 @@
 #pragma once
 
 #include "AttendanceTypes.h"
+#include <ElaDialog.h>
 
 #include <QDate>
-#include <QDialog>
 
-class QCheckBox;
+class ElaPlainTextEdit;
+class ElaToggleSwitch;
 class QLabel;
-class QPlainTextEdit;
 class QTimeEdit;
 
-class TimeSettingDialog : public QDialog {
+class TimeSettingDialog : public ElaDialog {
     Q_OBJECT
 
 public:
@@ -27,9 +27,9 @@ private:
 
     QDate m_date;
     WorkSchedule m_schedule;
-    QCheckBox* m_needAverageCalCheckBox = nullptr;
+    ElaToggleSwitch* m_needAverageCalCheckBox = nullptr;
     QTimeEdit* m_arrivalTimeEdit = nullptr;
     QTimeEdit* m_departureTimeEdit = nullptr;
-    QPlainTextEdit* m_noteEdit = nullptr;
+    ElaPlainTextEdit* m_noteEdit = nullptr;
     QLabel* m_resultLabel = nullptr;
 };

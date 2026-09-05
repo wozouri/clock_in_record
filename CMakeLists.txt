@@ -20,4 +20,5 @@ if(MSVC)
 endif()
 
 # 添加src子目录
+add_subdirectory(third_party/ElaWidgetTools)
 add_subdirectory(src)

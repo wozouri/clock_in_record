@@ -3,11 +3,12 @@
 
 #include <QCalendarWidget>
 #include <QTableView>
-#include <QMenu>
 #include <QAction>
 #include <QDate>
 #include <QList>
 #include <QShowEvent>
+
+class QRubberBand;
 
 // �Զ��������ؼ���֧���Ҽ��˵�
 class CustomCalendarWidget : public QCalendarWidget {
@@ -28,6 +29,7 @@ public:
 signals:
     void selectionChanged();
     void dateDoubleClicked(const QDate& date);
+    void copyRequested(const QDate& date);
     void deleteRequested(const QList<QDate>& dates);
 
 private slots:
@@ -38,17 +40,25 @@ protected:
     void showEvent(QShowEvent* event) override;
 
 private:
+    void selectDateFromClick(const QDate& date, Qt::KeyboardModifiers modifiers);
+    QList<QDate> datesInRect(const QRect& rect) const;
+    void finishRubberBandSelection();
     void selectDateRange(const QDate& start, const QDate& end, bool additive);
     void setSingleSelection(const QDate& date);
     void toggleDateSelection(const QDate& date);
     bool isDateSelected(const QDate& date) const;
     void refreshSelection(const QList<QDate>& datesToUpdate);
-    QDate dateAt(const QPoint& pos);
+    QDate dateAt(const QPoint& pos) const;
 
     // tableView for date grid
     QTableView* m_tableView;
+    QRubberBand* m_selectionRubberBand = nullptr;
     QList<QDate> m_selectedDates;
     QDate m_selectionAnchorDate;
+    QDate m_dragStartDate;
+    QPoint m_dragStartPosition;
+    Qt::KeyboardModifiers m_dragModifiers = Qt::NoModifier;
+    bool m_dragSelectionActive = false;
 };
 
 #endif // CUSTOMCALENDARWIDGET_H

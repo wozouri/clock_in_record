@@ -1,7 +1,7 @@
 ﻿#include "AttendanceMainWindow.h"
 #include "Utils/CustomCalendarWidget.h"
 #include "Utils/TimeSettingDialog.h"
-#include "Utils/WorkScheduleDialog.h"
+#include "Utils/WorkScheduleSettingsPage.h"
 #include "Data/AttendanceJsonService.h"
 #include "Data/AttendanceStatsService.h"
 #include "Data/AttendanceStorage.h"
@@ -14,12 +14,28 @@
 #include <QMessageBox>
 #include <QPushButton>
 #include <QFileDialog>
-#include <QStatusBar>
 #include <QAction>
 #include <QKeySequence>
+#include <QTimer>
+#include <ElaIcon.h>
+#include <ElaAppBar.h>
+#include <ElaMessageBar.h>
+#include <ElaNavigationBar.h>
+#include <ElaPushButton.h>
+#include <ElaTeachingTip.h>
 #include <algorithm>
 
+#ifdef Q_OS_WIN
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
+
 namespace {
+constexpr int kMinimumWindowWidth = 1120;
+constexpr int kMinimumWindowHeight = 720;
+
 bool recordsEqual(const AttendanceRecord& lhs, const AttendanceRecord& rhs) {
     return lhs.needAverageCal == rhs.needAverageCal
         && lhs.arrivalTime == rhs.arrivalTime
@@ -41,22 +57,50 @@ QString recordSummaryHtml(const AttendanceRecord& record) {
         .arg(workdayMarker);
 }
 
-QString recordNoteHtml(const AttendanceRecord& record) {
-    const QString note = record.note.trimmed();
-    if (note.isEmpty()) {
-        return QString();
-    }
-    return QString("<br><span style='font-size:12px; color:#475569;'>%1</span>")
-        .arg(note.toHtmlEscaped().replace('\n', "<br>"));
-}
+QString recordTipSummary(const QDate& date, const AttendanceRecord& record) {
+    const QString workdayMarker = record.needAverageCal
+        ? QStringLiteral("工作日")
+        : QStringLiteral("非工作日");
+    return QStringLiteral("%1    %2    %3    %4")
+        .arg(date.toString(QStringLiteral("yyyy.M.d")),
+             record.arrivalTime.toString(QStringLiteral("hh:mm")),
+             record.departureTime.toString(QStringLiteral("hh:mm")),
+             workdayMarker);
 }
 
-AttendanceMainWindow::AttendanceMainWindow(QWidget* parent) : QMainWindow(parent) {
-    setWindowTitle(QString("打卡管理系统"));
+}
+
+AttendanceMainWindow::AttendanceMainWindow(QWidget* parent) : ElaWindow(parent) {
+    setWindowTitle(QStringLiteral("工时簿"));
     setMinimumSize(1040, 680);
     resize(1180, 760);
 
+    setAppBarHeight(48);
+    setIsNavigationBarEnable(true);
+    setNavigationBarDisplayMode(ElaNavigationType::Maximal);
+    setNavigationBarWidth(260);
+    setIsAllowPageOpenInNewWindow(false);
+    setIsCentralStackedWidgetTransparent(true);
+    setUserInfoCardVisible(false);
+    setWindowButtonFlags(ElaAppBarType::RouteBackButtonHint
+        | ElaAppBarType::MinimizeButtonHint
+        | ElaAppBarType::CloseButtonHint);
+
     setupUI();
+
+    if (auto* navigationBar = findChild<ElaNavigationBar*>()) {
+        navigationBar->setIsTransparent(true);
+        for (auto* child : navigationBar->findChildren<QWidget*>()) {
+            const QString className = QString::fromLatin1(child->metaObject()->className());
+            if (className == QStringLiteral("ElaSuggestBox")
+                || className == QStringLiteral("ElaToolButton")) {
+                child->hide();
+            }
+        }
+    }
+
+    // ElaWindow completes its internal layout during setupUI; apply the usable size floor afterwards.
+    setMinimumSize(kMinimumWindowWidth, kMinimumWindowHeight);
 }
 
 void AttendanceMainWindow::mousePressEvent(QMouseEvent* event) {
@@ -71,7 +115,53 @@ void AttendanceMainWindow::mousePressEvent(QMouseEvent* event) {
         }
     }
 
-    QMainWindow::mousePressEvent(event);
+    ElaWindow::mousePressEvent(event);
+}
+
+void AttendanceMainWindow::moveEvent(QMoveEvent* event) {
+    ElaWindow::moveEvent(event);
+
+    if (m_contextTipRefreshPending) {
+        return;
+    }
+    m_contextTipRefreshPending = true;
+    QTimer::singleShot(0, this, [this] {
+        m_contextTipRefreshPending = false;
+        refreshContextTipPositions();
+    });
+}
+
+#ifdef Q_OS_WIN
+bool AttendanceMainWindow::nativeEvent(const QByteArray& eventType, void* message, long* result) {
+    const bool handled = ElaWindow::nativeEvent(eventType, message, result);
+    auto* nativeMessage = static_cast<MSG*>(message);
+    if (nativeMessage->message == WM_GETMINMAXINFO) {
+        auto* minMaxInfo = reinterpret_cast<MINMAXINFO*>(nativeMessage->lParam);
+        minMaxInfo->ptMinTrackSize.x = kMinimumWindowWidth;
+        minMaxInfo->ptMinTrackSize.y = kMinimumWindowHeight;
+    }
+    return handled;
+}
+#endif
+
+bool AttendanceMainWindow::eventFilter(QObject* watched, QEvent* event) {
+    if (watched == m_statsLabel) {
+        if (event->type() == QEvent::Enter) {
+            if (!m_statsContextTip) {
+                m_statsContextTip = new ElaTeachingTip(this);
+                m_statsContextTip->setTailPosition(ElaTeachingTip::Bottom);
+                m_statsContextTip->setTarget(m_statsLabel);
+                m_statsContextTip->setIsLightDismiss(false);
+                m_statsContextTip->setCloseButtonVisible(false);
+            }
+            m_statsContextTip->setTitle(QStringLiteral("月度统计"));
+            m_statsContextTip->setContent(m_monthlyStatsText);
+            m_statsContextTip->showTip();
+        } else if (event->type() == QEvent::Leave && m_statsContextTip) {
+            m_statsContextTip->closeTip();
+        }
+    }
+    return ElaWindow::eventFilter(watched, event);
 }
 
 void AttendanceMainWindow::onDateDoubleClicked(const QDate& date) {
@@ -136,14 +226,9 @@ void AttendanceMainWindow::onExportJsonClicked() {
     }
 }
 
-void AttendanceMainWindow::onWorkScheduleSettingsClicked()
+void AttendanceMainWindow::onWorkScheduleChanged(const WorkSchedule& schedule)
 {
-    WorkScheduleDialog dialog(AttendanceStorage::loadWorkSchedule(), this);
-    if (dialog.exec() != QDialog::Accepted) {
-        return;
-    }
-
-    AttendanceStorage::saveWorkSchedule(dialog.workSchedule());
+    AttendanceStorage::saveWorkSchedule(schedule);
     refreshMonthlyView();
     showStatusMessage(QStringLiteral("工作制度已更新"));
 }
@@ -172,63 +257,123 @@ void AttendanceMainWindow::processExportFile(const QString& filePath) {
         return;
     }
 
-    showStatusMessage(QString("已导出 %1 条记录到 %2").arg(result.exportedCount).arg(filePath), 5000);
+    showStatusMessage(QString("已导出 %1 条记录到 %2").arg(result.exportedCount).arg(filePath));
 }
 
 
 void AttendanceMainWindow::setupUI() {
-    QWidget* centralWidget = new QWidget();
-    setCentralWidget(centralWidget);
-
-    QHBoxLayout* mainLayout = new QHBoxLayout(centralWidget);
-    mainLayout->setContentsMargins(16, 14, 16, 16);
+    auto* calendarPage = new QWidget();
+    calendarPage->setObjectName(QStringLiteral("attendanceCalendarPage"));
+    calendarPage->setMinimumSize(840, 600);
+    calendarPage->setStyleSheet(QStringLiteral(
+        "QWidget#attendanceCalendarPage { background: #f7f9fc; }"));
+    auto* mainLayout = new QVBoxLayout(calendarPage);
+    mainLayout->setContentsMargins(0, 0, 0, 0);
     mainLayout->setSpacing(0);
+
+    auto* toolbar = new QWidget(calendarPage);
+    toolbar->setObjectName(QStringLiteral("attendanceToolbar"));
+    toolbar->setFixedHeight(58);
+    toolbar->setStyleSheet(QStringLiteral(
+        "QWidget#attendanceToolbar { background: #ffffff; border-bottom: 1px solid #dce5ee; }"));
+    auto* toolbarLayout = new QHBoxLayout(toolbar);
+    toolbarLayout->setContentsMargins(16, 10, 16, 10);
+    toolbarLayout->setSpacing(8);
+
+    const auto createToolbarButton = [toolbar](const QString& text, ElaIconType::IconName icon) {
+        auto* button = new ElaPushButton(text, toolbar);
+        button->setIcon(ElaIcon::getInstance()->getElaIcon(icon, 15));
+        button->setIconSize(QSize(15, 15));
+        button->setFixedHeight(34);
+        button->setCursor(Qt::PointingHandCursor);
+        button->setStyleSheet(QStringLiteral(
+            "QPushButton { background: #ffffff; color: #223550; border: 1px solid #d8e1eb;"
+            " border-radius: 5px; padding: 0 13px; }"
+            "QPushButton:hover:enabled { background: #edf4fb; border-color: #b9cee2; }"
+            "QPushButton:disabled { color: #9aa5b1; background: #f5f6f8; border-color: #e0e5ea; }"));
+        return button;
+    };
+
+    auto* importBtn = createToolbarButton(QStringLiteral("导入"), ElaIconType::FileImport);
+    connect(importBtn, &ElaPushButton::clicked, this, &AttendanceMainWindow::onImportJsonClicked);
+
+    auto* exportBtn = createToolbarButton(QStringLiteral("导出"), ElaIconType::FileExport);
+    connect(exportBtn, &ElaPushButton::clicked, this, &AttendanceMainWindow::onExportJsonClicked);
+
+    auto* copyBtn = createToolbarButton(QStringLiteral("复制"), ElaIconType::Clipboard);
+    m_copySelectedButton = copyBtn;
+    connect(copyBtn, &ElaPushButton::clicked, this, &AttendanceMainWindow::onCopySelectedClicked);
+    toolbarLayout->addWidget(copyBtn);
+
+    auto* applyBtn = createToolbarButton(QStringLiteral("粘贴"), ElaIconType::ClipboardCheck);
+    m_applyCopiedButton = applyBtn;
+    applyBtn->setStyleSheet(QStringLiteral(
+        "QPushButton { background: #eaf4fd; color: #1769aa; border: 1px solid #9fc8ea;"
+        " border-radius: 5px; padding: 0 13px; }"
+        "QPushButton:hover:enabled { background: #dceefd; border-color: #75b1df; }"
+        "QPushButton:disabled { color: #9aa5b1; background: #f5f6f8; border-color: #e0e5ea; }"));
+    connect(applyBtn, &ElaPushButton::clicked, this, &AttendanceMainWindow::onApplyCopiedClicked);
+    toolbarLayout->addWidget(applyBtn);
+
+    auto* deleteBtn = createToolbarButton(QStringLiteral("删除"), ElaIconType::TrashCan);
+    m_deleteSelectedButton = deleteBtn;
+    deleteBtn->setStyleSheet(QStringLiteral(
+        "QPushButton { background: #ffffff; color: #b42318; border: 1px solid #e9b7b1;"
+        " border-radius: 5px; padding: 0 13px; }"
+        "QPushButton:hover:enabled { background: #fff1f0; border-color: #dc8d84; }"
+        "QPushButton:disabled { color: #9aa5b1; background: #f5f6f8; border-color: #e0e5ea; }"));
+    connect(deleteBtn, &ElaPushButton::clicked, this, &AttendanceMainWindow::onDeleteSelectionRequested);
+    toolbarLayout->addWidget(deleteBtn);
+
+    auto* selectMonthBtn = createToolbarButton(QStringLiteral("全选"), ElaIconType::ListCheck);
+    m_selectMonthButton = selectMonthBtn;
+    connect(selectMonthBtn, &ElaPushButton::clicked,
+        this, &AttendanceMainWindow::onSelectAllCurrentMonthRequested);
+    toolbarLayout->addWidget(selectMonthBtn);
+
+    m_statsLabel = new QLabel(toolbar);
+    m_statsLabel->setFixedHeight(30);
+    m_statsLabel->setCursor(Qt::WhatsThisCursor);
+    m_statsLabel->setStyleSheet(QStringLiteral(
+        "QLabel { color: #36516f; background: #f3f7fb; border: 1px solid #d9e5f0;"
+        " border-radius: 5px; padding: 0 12px; font-weight: 600; }"
+        "QLabel:hover { background: #eaf3fb; border-color: #b8cfe3; }"));
+    m_statsLabel->setText(QStringLiteral("平均加班 --"));
+    m_statsLabel->installEventFilter(this);
+    toolbarLayout->addWidget(m_statsLabel);
+
+    auto* currentMonthBtn = createToolbarButton(QStringLiteral("回到本月"), ElaIconType::CalendarDay);
+    currentMonthBtn->setToolTip(QStringLiteral("切换到当前月份"));
+    currentMonthBtn->setIcon(ElaIcon::getInstance()->getElaIcon(
+        ElaIconType::CalendarDay, 15, QColor(Qt::white)));
+    currentMonthBtn->setLightDefaultColor(QColor(QStringLiteral("#1769aa")));
+    currentMonthBtn->setLightHoverColor(QColor(QStringLiteral("#0f5c9b")));
+    currentMonthBtn->setLightPressColor(QColor(QStringLiteral("#0b4d82")));
+    currentMonthBtn->setLightTextColor(Qt::white);
+    currentMonthBtn->setVisible(false);
+    m_showCurrentMonthButton = currentMonthBtn;
+    connect(currentMonthBtn, &ElaPushButton::clicked,
+        this, &AttendanceMainWindow::onShowCurrentMonthRequested);
+    toolbarLayout->addWidget(currentMonthBtn);
+
+    toolbarLayout->addStretch();
+
+    auto* separator = new QWidget(toolbar);
+    separator->setFixedSize(1, 22);
+    separator->setStyleSheet(QStringLiteral("background: #dce5ee;"));
+    toolbarLayout->addWidget(separator);
+    toolbarLayout->addWidget(importBtn);
+    toolbarLayout->addWidget(exportBtn);
+    mainLayout->addWidget(toolbar);
+
+    auto* workspace = new QWidget(calendarPage);
+    auto* workspaceLayout = new QHBoxLayout(workspace);
+    workspaceLayout->setContentsMargins(0, 0, 0, 0);
+    workspaceLayout->setSpacing(0);
+    mainLayout->addWidget(workspace);
 
     // 左侧：日历
     QVBoxLayout* leftLayout = new QVBoxLayout();
-
-    QHBoxLayout* headerLayout = new QHBoxLayout();
-
-    QLabel* titleLabel = new QLabel(QString("考勤日历"));
-    titleLabel->setStyleSheet("font-size: 20px; font-weight: bold; padding: 2px 0;");
-    headerLayout->addWidget(titleLabel);
-
-    headerLayout->addStretch();
-
-    const QString headerButtonStyle =
-        "QPushButton { border: none; border-radius: 4px; padding: 0 13px; min-height: 32px; }"
-        "QPushButton:hover { background-color: #e8eef4; }";
-
-    // [导入按钮]
-    QPushButton* importBtn = new QPushButton("导入数据");
-    importBtn->setCursor(Qt::PointingHandCursor);
-    importBtn->setStyleSheet(
-        "QPushButton { background-color: #4CAF50; color: white; border: none; border-radius: 4px; padding: 0 13px; min-height: 32px; }"
-        "QPushButton:hover { background-color: #45a049; }"
-    );
-    connect(importBtn, &QPushButton::clicked, this, &AttendanceMainWindow::onImportJsonClicked);
-    headerLayout->addWidget(importBtn);
-
-    // [导出按钮]
-    QPushButton* exportBtn = new QPushButton("导出数据");
-    exportBtn->setCursor(Qt::PointingHandCursor);
-    exportBtn->setStyleSheet(
-        "QPushButton { background-color: #2196F3; color: white; border: none; border-radius: 4px; padding: 0 13px; min-height: 32px; }"
-        "QPushButton:hover { background-color: #0b7dda; }"
-    );
-    connect(exportBtn, &QPushButton::clicked, this, &AttendanceMainWindow::onExportJsonClicked);
-    headerLayout->addWidget(exportBtn);
-
-    QPushButton* scheduleBtn = new QPushButton(QStringLiteral("工作制度"));
-    scheduleBtn->setCursor(Qt::PointingHandCursor);
-    scheduleBtn->setToolTip(QStringLiteral("设置标准上下班与休息时间"));
-    scheduleBtn->setStyleSheet(headerButtonStyle);
-    connect(scheduleBtn, &QPushButton::clicked,
-        this, &AttendanceMainWindow::onWorkScheduleSettingsClicked);
-    headerLayout->addWidget(scheduleBtn);
-    headerLayout->setSpacing(8);
-
-    leftLayout->addLayout(headerLayout);
 
     // 使用自定义日历控件
     m_calendar = new CustomCalendarWidget();
@@ -236,61 +381,8 @@ void AttendanceMainWindow::setupUI() {
     m_calendar->setFirstDayOfWeek(Qt::Monday);
     m_calendar->setGridVisible(true);
     leftLayout->addWidget(m_calendar);
-    leftLayout->setSpacing(10);
-
-    // 右侧：统计和管理
-    QVBoxLayout* rightLayout = new QVBoxLayout();
-    rightLayout->setSpacing(12);
-    rightLayout->setContentsMargins(0, 0, 0, 0);
-
-    QGroupBox* batchGroup = new QGroupBox(QString("日历操作"));
-    QVBoxLayout* batchLayout = new QVBoxLayout(batchGroup);
-    batchLayout->setContentsMargins(12, 18, 12, 12);
-    batchLayout->setSpacing(8);
-
-    m_selectionLabel = new QLabel();
-    m_selectionLabel->setWordWrap(true);
-    m_selectionLabel->setTextFormat(Qt::RichText);
-
-    m_copyStatusLabel = new QLabel();
-    m_copyStatusLabel->setWordWrap(true);
-    m_copyStatusLabel->setTextFormat(Qt::RichText);
-    batchLayout->addWidget(m_copyStatusLabel);
-    batchLayout->addWidget(m_selectionLabel);
-
-    m_copySelectedButton = new QPushButton();
-    m_copySelectedButton->setCursor(Qt::PointingHandCursor);
-    m_copySelectedButton->setMinimumHeight(34);
-    m_copySelectedButton->setStyleSheet(
-        "QPushButton { background-color: #ffffff; color: #1769aa; border: 1px solid #8bbce5; border-radius: 4px; padding: 0 10px; }"
-        "QPushButton:hover:enabled { background-color: #eaf4fd; }"
-        "QPushButton:disabled { color: #8b98a5; border-color: #d6dde3; background-color: #f4f6f8; }"
-    );
-    connect(m_copySelectedButton, &QPushButton::clicked, this, &AttendanceMainWindow::onCopySelectedClicked);
-    batchLayout->addWidget(m_copySelectedButton);
-
-    m_applyCopiedButton = new QPushButton();
-    m_applyCopiedButton->setCursor(Qt::PointingHandCursor);
-    m_applyCopiedButton->setMinimumHeight(34);
-    m_applyCopiedButton->setStyleSheet(
-        "QPushButton { background-color: #1976d2; color: white; border: none; border-radius: 4px; padding: 0 10px; }"
-        "QPushButton:hover:enabled { background-color: #1565c0; }"
-        "QPushButton:disabled { color: #8b98a5; background-color: #e2e7eb; }"
-    );
-    connect(m_applyCopiedButton, &QPushButton::clicked, this, &AttendanceMainWindow::onApplyCopiedClicked);
-    batchLayout->addWidget(m_applyCopiedButton);
-
-    m_deleteSelectedButton = new QPushButton();
-    m_deleteSelectedButton->setCursor(Qt::PointingHandCursor);
-    m_deleteSelectedButton->setMinimumHeight(34);
-    m_deleteSelectedButton->setStyleSheet(
-        "QPushButton { background-color: #ffffff; color: #c53030; border: 1px solid #e3a2a2; border-radius: 4px; padding: 0 10px; }"
-        "QPushButton:hover:enabled { background-color: #fff1f1; }"
-        "QPushButton:disabled { color: #9aa5b1; border-color: #d6dde3; background-color: #f4f6f8; }"
-    );
-    connect(m_deleteSelectedButton, &QPushButton::clicked,
-        this, &AttendanceMainWindow::onDeleteSelectionRequested);
-    batchLayout->addWidget(m_deleteSelectedButton);
+    leftLayout->setContentsMargins(32, 22, 32, 30);
+    leftLayout->setSpacing(0);
 
     QAction* copyAction = new QAction(this);
     copyAction->setShortcut(QKeySequence::Copy);
@@ -361,38 +453,26 @@ void AttendanceMainWindow::setupUI() {
     });
     addAction(clearSelectionAction);
 
-    rightLayout->addWidget(batchGroup);
-
-    // 月度统计
-    QGroupBox* statsGroup = new QGroupBox(QString("月度统计"));
-    QVBoxLayout* statsLayout = new QVBoxLayout(statsGroup);
-    statsLayout->setContentsMargins(12, 18, 12, 12);
-    m_statsLabel = new QLabel(QString("请选择月份查看统计"));
-    m_statsLabel->setWordWrap(true);
-    m_statsLabel->setStyleSheet("padding: 4px 2px; color: #374151; line-height: 1.5;");
-    statsLayout->addWidget(m_statsLabel);
-    rightLayout->addWidget(statsGroup);
-    rightLayout->addStretch();
-
-    // 使用分割器
-    QSplitter* splitter = new QSplitter(Qt::Horizontal);
-
     QWidget* leftWidget = new QWidget();
     leftWidget->setLayout(leftLayout);
     leftWidget->setMinimumWidth(680);
+    leftWidget->setStyleSheet(QStringLiteral("background: transparent;"));
+    workspaceLayout->addWidget(leftWidget);
 
-    QWidget* rightWidget = new QWidget();
-    rightWidget->setLayout(rightLayout);
-    rightWidget->setMinimumWidth(280);
-    rightWidget->setMaximumWidth(340);
+    m_workScheduleSettingsPage = new WorkScheduleSettingsPage();
+    m_workScheduleSettingsPage->setWorkSchedule(AttendanceStorage::loadWorkSchedule());
+    connect(m_workScheduleSettingsPage, &WorkScheduleSettingsPage::workScheduleSaved,
+        this, &AttendanceMainWindow::onWorkScheduleChanged);
 
-    splitter->addWidget(leftWidget);
-    splitter->addWidget(rightWidget);
-    splitter->setStretchFactor(0, 2);
-    splitter->setStretchFactor(1, 0);
-    splitter->setSizes(QList<int>{ 780, 300 });
-
-    mainLayout->addWidget(splitter);
+    QString attendanceNavigationKey;
+    addExpanderNode(QStringLiteral("考勤管理"), attendanceNavigationKey, ElaIconType::Calendar);
+    addPageNode(QStringLiteral("日历记录"), calendarPage, attendanceNavigationKey,
+        ElaIconType::CalendarDays);
+    expandNavigationNode(attendanceNavigationKey);
+    QString settingsPageKey;
+    addFooterNode(QStringLiteral("设置"), m_workScheduleSettingsPage, settingsPageKey, 0,
+        ElaIconType::Gear);
+    navigation(calendarPage->property("ElaPageKey").toString());
 
     // 连接信号
     connect(m_calendar, &CustomCalendarWidget::dateDoubleClicked, this, &AttendanceMainWindow::onDateDoubleClicked);
@@ -401,6 +481,8 @@ void AttendanceMainWindow::setupUI() {
         this, &AttendanceMainWindow::onMonthChanged);
     connect(m_calendar, &CustomCalendarWidget::deleteRequested,
         this, &AttendanceMainWindow::onDeleteRequested);
+    connect(m_calendar, &CustomCalendarWidget::copyRequested,
+        this, &AttendanceMainWindow::onCopyRequested);
 
     refreshMonthlyView();
     updateBatchActionState();
@@ -488,12 +570,26 @@ void AttendanceMainWindow::onCopySelectedClicked() {
         return;
     }
 
+    copyRecord(sourceDate);
+}
+
+void AttendanceMainWindow::onCopyRequested(const QDate& date)
+{
+    copyRecord(date);
+}
+
+void AttendanceMainWindow::copyRecord(const QDate& sourceDate)
+{
+    if (!AttendanceStorage::hasArrivalRecord(sourceDate)) {
+        return;
+    }
+
     m_copiedRecord = AttendanceStorage::loadRecord(sourceDate);
     m_copiedFromDate = sourceDate;
     m_hasCopiedRecord = true;
 
     updateBatchActionState();
-    showStatusMessage(QString("已复制 %1 的记录").arg(sourceDate.toString("yyyy-MM-dd")));
+    showStatusMessage(QStringLiteral("已复制 %1 的记录").arg(sourceDate.toString(QStringLiteral("yyyy-MM-dd"))));
 }
 
 void AttendanceMainWindow::onApplyCopiedClicked() {
@@ -595,8 +691,15 @@ void AttendanceMainWindow::onSelectAllCurrentMonthRequested() {
     showStatusMessage(QString("已选中当前月份的 %1 个记录日期").arg(monthDates.size()));
 }
 
+void AttendanceMainWindow::onShowCurrentMonthRequested()
+{
+    const QDate today = QDate::currentDate();
+    m_calendar->setCurrentPage(today.year(), today.month());
+}
+
 void AttendanceMainWindow::showStatusMessage(const QString& message, int timeoutMs) {
-    statusBar()->showMessage(message, timeoutMs);
+    ElaMessageBar::information(ElaMessageBarType::Top, QStringLiteral("考勤"),
+        message, timeoutMs, this, 24);
 }
 
 AttendanceMainWindow::AttendanceRecordState AttendanceMainWindow::captureRecordState(const QDate& date) const {
@@ -656,71 +759,11 @@ void AttendanceMainWindow::updateUndoRedoActionState() {
 
 void AttendanceMainWindow::updateBatchActionState() {
     const QList<QDate> dates = m_calendar->selectedDates();
-    if (dates.isEmpty()) {
-        m_selectionLabel->setVisible(true);
-        m_selectionLabel->setText(
-            QString("<span style='font-size:15px; font-weight:600; color:#64748b;'>未选择日期</span>"));
-        m_selectionLabel->setStyleSheet(
-            "padding: 9px 10px; background-color: #f6f8fa; border: 1px solid #e2e8f0; border-radius: 4px;");
-        m_selectionLabel->setToolTip(QString());
-    }
-    else if (dates.size() == 1) {
-        m_selectionLabel->setVisible(true);
-        const QDate date = dates.first();
-        const bool hasRecord = AttendanceStorage::hasArrivalRecord(date);
-        QString recordSummary;
-        if (hasRecord) {
-            const AttendanceRecord record = AttendanceStorage::loadRecord(date);
-            recordSummary = QString("<br>%1%2").arg(recordSummaryHtml(record), recordNoteHtml(record));
-            m_selectionLabel->setToolTip(QStringLiteral("向下箭头：到岗时间；向上箭头：离岗时间；勾选：计入工作日统计；空心圆：不计入工作日统计"));
-            m_selectionLabel->setStyleSheet(
-                "padding: 9px 10px; background-color: #edf6ff; border: 1px solid #b8d9f4; border-radius: 4px;");
-        }
-        else {
-            m_selectionLabel->setToolTip(QString());
-            m_selectionLabel->setStyleSheet(
-                "padding: 9px 10px; background-color: #f1f3f5; border: 1px solid #d6dce2; border-radius: 4px;");
-        }
-        m_selectionLabel->setText(QString(
-            "<span style='font-size:15px; font-weight:600; color:%1;'>%2</span>%3")
-            .arg(hasRecord ? QStringLiteral("#1e3a5f") : QStringLiteral("#64748b"))
-            .arg(date.toString("yyyy年M月d日"))
-            .arg(recordSummary));
-    }
-    else {
-        m_selectionLabel->setVisible(true);
-        m_selectionLabel->setText(QString(
-            "<span style='font-size:15px; font-weight:600; color:#1e3a5f;'>已选择 %1 个日期</span>")
-            .arg(dates.size()));
-        m_selectionLabel->setStyleSheet(
-            "padding: 9px 10px; background-color: #edf6ff; border: 1px solid #b8d9f4; border-radius: 4px;");
-        m_selectionLabel->setToolTip(QString());
-    }
-
-    if (m_hasCopiedRecord) {
-        m_copyStatusLabel->setText(QString(
-            "<span style='font-size:15px; font-weight:600; color:#1f5c40;'>%1</span><br>%2%3")
-            .arg(m_copiedFromDate.toString("yyyy年M月d日"))
-            .arg(recordSummaryHtml(m_copiedRecord))
-            .arg(recordNoteHtml(m_copiedRecord)));
-        m_copyStatusLabel->setStyleSheet(
-            "padding: 9px 10px; background-color: #eefaf3; border: 1px solid #b9e2c9; border-radius: 4px;");
-        m_copyStatusLabel->setToolTip(QStringLiteral("已复制的记录：向下箭头为到岗时间，向上箭头为离岗时间，勾选表示计入工作日统计"));
-        m_copyStatusLabel->setVisible(true);
-    }
-    else {
-        m_copyStatusLabel->setText(
-            QString("<span style='font-size:15px; font-weight:600; color:#64748b;'>未复制记录</span>"));
-        m_copyStatusLabel->setStyleSheet(
-            "padding: 9px 10px; background-color: #f6f8fa; border: 1px solid #e2e8f0; border-radius: 4px;");
-        m_copyStatusLabel->setVisible(true);
-        m_copyStatusLabel->setToolTip(QString());
-    }
-
     const bool canCopy = dates.size() == 1 && AttendanceStorage::hasArrivalRecord(dates.first());
     bool canApply = false;
     int targetCount = 0;
     int deletableCount = 0;
+    int monthRecordCount = 0;
     for (const QDate& date : dates) {
         if (AttendanceStorage::hasArrivalRecord(date)) {
             ++deletableCount;
@@ -734,46 +777,125 @@ void AttendanceMainWindow::updateBatchActionState() {
             }
         }
     }
+
+    for (const QString& dateKey : AttendanceStorage::recordedDates()) {
+        const QDate date = QDate::fromString(dateKey, QStringLiteral("yyyy-MM-dd"));
+        if (date.isValid() && date.year() == m_calendar->yearShown()
+            && date.month() == m_calendar->monthShown()) {
+            ++monthRecordCount;
+        }
+    }
+
     m_copySelectedButton->setEnabled(canCopy);
     m_applyCopiedButton->setEnabled(canApply);
     m_deleteSelectedButton->setEnabled(deletableCount > 0);
+    m_selectMonthButton->setEnabled(monthRecordCount > 0);
+    const QDate today = QDate::currentDate();
+    m_showCurrentMonthButton->setVisible(m_calendar->yearShown() != today.year()
+        || m_calendar->monthShown() != today.month());
 
     if (canCopy) {
-        m_copySelectedButton->setText(QString("复制 %1 的记录").arg(dates.first().toString("M月d日")));
-        m_copySelectedButton->setToolTip(QString("将 %1 的记录设为来源").arg(dates.first().toString("yyyy年M月d日")));
+        m_copySelectedButton->setToolTip(
+            QStringLiteral("复制 %1 的记录").arg(dates.first().toString(QStringLiteral("yyyy年M月d日"))));
     }
     else {
-        m_copySelectedButton->setText(QString("复制记录"));
-        m_copySelectedButton->setToolTip(QString());
+        m_copySelectedButton->setToolTip(QStringLiteral("单选一条已有记录后可复制"));
     }
 
     if (canApply) {
-        m_applyCopiedButton->setText(QString("应用至 %1 个已选日期").arg(targetCount));
-        m_applyCopiedButton->setToolTip(QString("用已复制记录覆盖目标日期"));
+        m_applyCopiedButton->setToolTip(
+            QStringLiteral("粘贴到 %1 个已选日期").arg(targetCount));
     }
     else if (m_hasCopiedRecord) {
-        m_applyCopiedButton->setText(QString("应用记录"));
-        m_applyCopiedButton->setToolTip(QString());
+        m_applyCopiedButton->setToolTip(QStringLiteral("选择至少一个非来源日期后可粘贴"));
     }
     else {
-        m_applyCopiedButton->setText(QString("应用记录"));
-        m_applyCopiedButton->setToolTip(QString());
+        m_applyCopiedButton->setToolTip(QStringLiteral("请先复制一条记录"));
     }
 
     if (deletableCount > 0) {
-        m_deleteSelectedButton->setText(QString("删除 %1 条记录").arg(deletableCount));
-        m_deleteSelectedButton->setToolTip(QString("删除当前选择中的已有记录"));
+        m_deleteSelectedButton->setToolTip(
+            QStringLiteral("删除当前选择中的 %1 条记录").arg(deletableCount));
     }
     else {
-        m_deleteSelectedButton->setText(QString("删除记录"));
-        m_deleteSelectedButton->setToolTip(QString());
+        m_deleteSelectedButton->setToolTip(QStringLiteral("选择已有记录后可删除"));
+    }
+
+    m_selectMonthButton->setToolTip(monthRecordCount > 0
+        ? QStringLiteral("选中本月的 %1 条记录").arg(monthRecordCount)
+        : QStringLiteral("本月没有记录"));
+
+    updateContextTips(dates);
+}
+
+void AttendanceMainWindow::updateContextTips(const QList<QDate>& dates) {
+    const bool hasSingleRecord = dates.size() == 1
+        && AttendanceStorage::hasArrivalRecord(dates.first());
+
+    // 相邻工具按钮无法同时承载两块持久提示，复制来源优先展示。
+    if (hasSingleRecord && !m_hasCopiedRecord) {
+        const QDate date = dates.first();
+        const AttendanceRecord record = AttendanceStorage::loadRecord(date);
+        if (!m_copyContextTip) {
+            m_copyContextTip = new ElaTeachingTip(this);
+            m_copyContextTip->setTailPosition(ElaTeachingTip::Bottom);
+            m_copyContextTip->setTarget(m_copySelectedButton);
+            m_copyContextTip->setIsLightDismiss(false);
+            m_copyContextTip->setCloseButtonVisible(false);
+            m_copyContextTip->setStyleSheet(QStringLiteral(
+                "ElaTeachingTip QLabel { color: #1f2937; }"));
+        }
+        m_copyContextTip->setTitle(recordTipSummary(date, record));
+        m_copyContextTip->setContent(QString());
+        m_copyContextTip->showTip();
+    } else if (m_copyContextTip) {
+        m_copyContextTip->closeTip();
+    }
+
+    if (m_hasCopiedRecord) {
+        if (!m_applyContextTip) {
+            m_applyContextTip = new ElaTeachingTip(this);
+            m_applyContextTip->setTailPosition(ElaTeachingTip::Bottom);
+            m_applyContextTip->setTarget(m_applyCopiedButton);
+            m_applyContextTip->setIsLightDismiss(false);
+            m_applyContextTip->setCloseButtonVisible(false);
+            m_applyContextTip->setStyleSheet(QStringLiteral(
+                "ElaTeachingTip QLabel { color: #1f2937; }"));
+        }
+        m_applyContextTip->setTitle(recordTipSummary(m_copiedFromDate, m_copiedRecord));
+        m_applyContextTip->setContent(QString());
+        m_applyContextTip->showTip();
+    } else if (m_applyContextTip) {
+        m_applyContextTip->closeTip();
     }
 }
 
+void AttendanceMainWindow::refreshContextTipPositions() {
+    const auto refreshTip = [](ElaTeachingTip* tip) {
+        if (!tip || !tip->isVisible()) {
+            return;
+        }
+        tip->closeTip();
+        tip->showTip();
+    };
+    refreshTip(m_copyContextTip);
+    refreshTip(m_applyContextTip);
+    refreshTip(m_statsContextTip);
+}
+
 void AttendanceMainWindow::updateCalendarAppearance(const MonthlyAttendanceSnapshot& snapshot) {
+    // Date formats and custom cell text are cached by absolute date. Clear the
+    // previously rendered month first so spill-over dates do not retain stale styling.
+    for (const QDate& date : m_renderedCalendarDates) {
+        m_calendar->setDateTextFormat(date, QTextCharFormat());
+        m_calendar->clearCustomData(date);
+    }
+    m_renderedCalendarDates.clear();
+
     for (auto it = snapshot.dayViews.constBegin(); it != snapshot.dayViews.constEnd(); ++it) {
         const QDate date = it.key();
         const AttendanceDayView& dayView = it.value();
+        m_renderedCalendarDates.append(date);
 
         if (dayView.hasRecord) {
             // 有打卡记录，显示绿色背景
@@ -821,10 +943,13 @@ void AttendanceMainWindow::updateMonthlyStatistics(const MonthlyAttendanceSnapsh
     stats += QString("总早退时间: %1小时%2分钟\n")
         .arg(snapshot.totalEarlyLeaveMinutes / 60)
         .arg(snapshot.totalEarlyLeaveMinutes % 60);
+    const QString averageOvertime = snapshot.workDays > 0
+        ? QString::number(snapshot.totalOvertimeMinutes / (60.0 * snapshot.workDays), 'f', 3)
+        : QStringLiteral("--");
     if (snapshot.workDays > 0) {
-        stats += QString("平均加班时间: %1小时")
-            .arg(snapshot.totalOvertimeMinutes / (60.0 * snapshot.workDays), 0, 'f', 3);
+        stats += QString("平均加班时间: %1小时").arg(averageOvertime);
     }
 
-    m_statsLabel->setText(stats);
+    m_monthlyStatsText = stats;
+    m_statsLabel->setText(QString("平均加班 %1 小时").arg(averageOvertime));
 }

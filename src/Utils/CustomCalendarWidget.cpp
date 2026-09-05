@@ -1,17 +1,44 @@
 #include "CustomCalendarWidget.h"
 #include "Data/AttendanceStorage.h"
-#include <QStyle>
+#include <ElaMenu.h>
+
 #include <QAbstractItemModel>
+#include <QApplication>
 #include <QContextMenuEvent>
 #include <QEvent>
 #include <QMouseEvent>
 #include <QPainter>
+#include <QPalette>
+#include <QRubberBand>
 #include <algorithm>
 #include <QTimer>
 
 
 CustomCalendarWidget::CustomCalendarWidget(QWidget* parent) : QCalendarWidget(parent), m_tableView(nullptr) {
     setSelectionMode(QCalendarWidget::NoSelection);
+    setAutoFillBackground(true);
+
+    QPalette calendarPalette = palette();
+    calendarPalette.setColor(QPalette::Window, QColor(QStringLiteral("#ffffff")));
+    calendarPalette.setColor(QPalette::Base, QColor(QStringLiteral("#ffffff")));
+    calendarPalette.setColor(QPalette::AlternateBase, QColor(QStringLiteral("#ffffff")));
+    calendarPalette.setColor(QPalette::Text, QColor(QStringLiteral("#1f2937")));
+    calendarPalette.setColor(QPalette::WindowText, QColor(QStringLiteral("#1f2937")));
+    calendarPalette.setColor(QPalette::ButtonText, QColor(QStringLiteral("#1f2937")));
+    calendarPalette.setColor(QPalette::Highlight, QColor(QStringLiteral("#e7f1fb")));
+    calendarPalette.setColor(QPalette::HighlightedText, QColor(QStringLiteral("#1f2937")));
+    setPalette(calendarPalette);
+    setStyleSheet(QStringLiteral(
+        "QCalendarWidget { background: #ffffff; color: #1f2937; border: 1px solid #dce5ee; }"
+        "QCalendarWidget QWidget#qt_calendar_navigationbar { background: #ffffff; border-bottom: 1px solid #dce5ee; }"
+        "QCalendarWidget QToolButton { color: #29415f; background: transparent; border: 0; padding: 4px; }"
+        "QCalendarWidget QToolButton:hover { background: #eaf1f7; border-radius: 4px; }"
+        "QCalendarWidget QAbstractItemView { background: #ffffff; color: #1f2937;"
+        " selection-background-color: #e7f1fb; selection-color: #1f2937; gridline-color: #dce5ee; }"
+        "QCalendarWidget QMenu { background: #ffffff; color: #223550; border: 1px solid #cfdce8;"
+        " border-radius: 5px; padding: 4px; }"
+        "QCalendarWidget QMenu::item { padding: 6px 20px 6px 10px; border-radius: 3px; }"
+        "QCalendarWidget QMenu::item:selected { background: #eaf3fb; color: #1769aa; }"));
     setupEventFilters();
     // QCalendarWidget internals may not be fully ready in ctor.
     // Retry once in next event loop to ensure right-click binding works.
@@ -25,7 +52,14 @@ void CustomCalendarWidget::setupEventFilters() {
 
     m_tableView = this->findChild<QTableView*>();
     if (m_tableView) {
+        m_tableView->setPalette(palette());
+        m_tableView->viewport()->setPalette(palette());
+        m_tableView->viewport()->setAutoFillBackground(true);
         QWidget* viewport = m_tableView->viewport();
+        m_selectionRubberBand = new QRubberBand(QRubberBand::Rectangle, viewport);
+        m_selectionRubberBand->setStyleSheet(QStringLiteral(
+            "QRubberBand { border: 1px solid #5b9bd5; background: rgba(91, 155, 213, 48); }"));
+        m_selectionRubberBand->hide();
         viewport->installEventFilter(this);
     }
 }
@@ -35,20 +69,45 @@ bool CustomCalendarWidget::eventFilter(QObject* watched, QEvent* event) {
         if (event->type() == QEvent::MouseButtonPress) {
             QMouseEvent* mouseEvent = static_cast<QMouseEvent*>(event);
             if (mouseEvent->button() == Qt::LeftButton) {
-                const QDate clickedDate = dateAt(mouseEvent->pos());
-                if (clickedDate.isValid()) {
-                    if ((mouseEvent->modifiers() & Qt::ShiftModifier) && m_selectionAnchorDate.isValid()) {
-                        selectDateRange(clickedDate,
-                            m_selectionAnchorDate,
-                            mouseEvent->modifiers() & Qt::ControlModifier);
-                    }
-                    else if (mouseEvent->modifiers() & Qt::ControlModifier) {
-                        toggleDateSelection(clickedDate);
-                    }
-                    else {
-                        setSingleSelection(clickedDate);
-                    }
+                m_dragStartDate = dateAt(mouseEvent->pos());
+                m_dragStartPosition = mouseEvent->pos();
+                m_dragModifiers = mouseEvent->modifiers();
+                m_dragSelectionActive = false;
+                if (m_selectionRubberBand) {
+                    m_selectionRubberBand->hide();
                 }
+                return m_dragStartDate.isValid();
+            }
+        }
+        else if (event->type() == QEvent::MouseMove) {
+            QMouseEvent* mouseEvent = static_cast<QMouseEvent*>(event);
+            if (!m_dragStartDate.isValid() || !(mouseEvent->buttons() & Qt::LeftButton)) {
+                return QCalendarWidget::eventFilter(watched, event);
+            }
+
+            if (!m_dragSelectionActive
+                && (mouseEvent->pos() - m_dragStartPosition).manhattanLength() >= QApplication::startDragDistance()) {
+                m_dragSelectionActive = true;
+                m_selectionRubberBand->show();
+            }
+            if (m_dragSelectionActive) {
+                const QRect selectionRect(m_dragStartPosition, mouseEvent->pos());
+                m_selectionRubberBand->setGeometry(selectionRect.normalized().adjusted(0, 0, 1, 1));
+            }
+            return true;
+        }
+        else if (event->type() == QEvent::MouseButtonRelease) {
+            QMouseEvent* mouseEvent = static_cast<QMouseEvent*>(event);
+            if (mouseEvent->button() == Qt::LeftButton && m_dragStartDate.isValid()) {
+                if (m_dragSelectionActive) {
+                    finishRubberBandSelection();
+                }
+                else {
+                    selectDateFromClick(m_dragStartDate, m_dragModifiers);
+                }
+                m_dragStartDate = QDate();
+                m_dragSelectionActive = false;
+                return true;
             }
         }
         else if (event->type() == QEvent::MouseButtonDblClick) {
@@ -56,6 +115,11 @@ bool CustomCalendarWidget::eventFilter(QObject* watched, QEvent* event) {
             if (mouseEvent->button() == Qt::LeftButton) {
                 const QDate clickedDate = dateAt(mouseEvent->pos());
                 if (clickedDate.isValid()) {
+                    m_dragStartDate = QDate();
+                    m_dragSelectionActive = false;
+                    if (m_selectionRubberBand) {
+                        m_selectionRubberBand->hide();
+                    }
                     setSingleSelection(clickedDate);
                     emit dateDoubleClicked(clickedDate);
                 }
@@ -107,18 +171,23 @@ void CustomCalendarWidget::paintCell(QPainter* painter, const QRect& rect, const
 
         painter->restore();
     }
-    painter->save();
-    QFont font = painter->font();
-    font.setPointSize(7);
-    painter->setFont(font);
-    painter->setPen(QPen(Qt::blue));
-
     const QVariantMap dayData = m_data.value(date);
-    QRect eventRectDown = rect.adjusted(2, rect.height() / 2, -2, -2);
-    QRect eventRectUp = rect.adjusted(2, -32, -2, -2);
-    painter->drawText(eventRectUp, Qt::AlignCenter, dayData.value("arrivalTime").toString());
-    painter->drawText(eventRectDown, Qt::AlignCenter, dayData.value("departureTime").toString());
-    painter->restore();
+    if (!dayData.isEmpty()) {
+        painter->save();
+        QFont font = painter->font();
+        font.setPointSize(7);
+        painter->setFont(font);
+        painter->setPen(QPen(Qt::blue));
+
+        const int lineHeight = qMin(14, qMax(10, rect.height() / 4));
+        const QRect arrivalRect(rect.left() + 2, rect.top() + 4,
+            rect.width() - 4, lineHeight);
+        const QRect departureRect(rect.left() + 2, rect.bottom() - lineHeight - 3,
+            rect.width() - 4, lineHeight);
+        painter->drawText(arrivalRect, Qt::AlignCenter, dayData.value("arrivalTime").toString());
+        painter->drawText(departureRect, Qt::AlignCenter, dayData.value("departureTime").toString());
+        painter->restore();
+    }
 
     if (dayData.value("hasNote").toBool()) {
         painter->save();
@@ -129,6 +198,67 @@ void CustomCalendarWidget::paintCell(QPainter* painter, const QRect& rect, const
         painter->restore();
     }
 
+}
+
+void CustomCalendarWidget::selectDateFromClick(const QDate& date, Qt::KeyboardModifiers modifiers)
+{
+    if (!date.isValid()) {
+        return;
+    }
+
+    if ((modifiers & Qt::ShiftModifier) && m_selectionAnchorDate.isValid()) {
+        selectDateRange(date, m_selectionAnchorDate, modifiers & Qt::ControlModifier);
+    }
+    else if (modifiers & Qt::ControlModifier) {
+        toggleDateSelection(date);
+    }
+    else {
+        setSingleSelection(date);
+    }
+}
+
+QList<QDate> CustomCalendarWidget::datesInRect(const QRect& rect) const
+{
+    QList<QDate> dates;
+    if (!m_tableView || !m_tableView->model()) {
+        return dates;
+    }
+
+    QAbstractItemModel* model = m_tableView->model();
+    for (int row = 0; row < model->rowCount(); ++row) {
+        for (int column = 0; column < model->columnCount(); ++column) {
+            const QModelIndex index = model->index(row, column);
+            const QRect cellRect = m_tableView->visualRect(index);
+            if (!cellRect.isEmpty() && rect.intersects(cellRect)) {
+                const QDate date = dateAt(cellRect.center());
+                if (date.isValid() && !dates.contains(date)) {
+                    dates.append(date);
+                }
+            }
+        }
+    }
+    return dates;
+}
+
+void CustomCalendarWidget::finishRubberBandSelection()
+{
+    const QRect selectionRect = m_selectionRubberBand->geometry();
+    m_selectionRubberBand->hide();
+
+    const QList<QDate> rubberBandDates = datesInRect(selectionRect);
+    if (rubberBandDates.isEmpty()) {
+        return;
+    }
+
+    QList<QDate> targetDates = (m_dragModifiers & Qt::ControlModifier)
+        ? m_selectedDates
+        : QList<QDate>();
+    for (const QDate& date : rubberBandDates) {
+        if (!targetDates.contains(date)) {
+            targetDates.append(date);
+        }
+    }
+    setSelectedDates(targetDates);
 }
 
 void CustomCalendarWidget::setCustomData(const QDate& date, const QVariantMap& value)
@@ -293,25 +423,37 @@ void CustomCalendarWidget::showContextMenu(const QPoint& pos) {
         return;
     }
 
-    // 创建右键菜单
-    QMenu contextMenu(this);
+    // Keep the business menu out of the calendar's QMenu stylesheet scope so
+    // ElaMenu can render with its own theme.
+    ElaMenu contextMenu;
+    contextMenu.setMenuItemHeight(34);
+
+    QAction* copyAction = nullptr;
+    if (targetDates.size() == 1 && AttendanceStorage::hasArrivalRecord(targetDates.first())) {
+        copyAction = contextMenu.addElaIconAction(ElaIconType::Clipboard, QStringLiteral("复制"));
+        contextMenu.addSeparator();
+    }
+
     QAction* deleteAction = nullptr;
     if (deletableDates.size() == 1) {
-        deleteAction = contextMenu.addAction(QString("删除 %1 的记录").arg(deletableDates.first().toString("yyyy-MM-dd")));
+        deleteAction = contextMenu.addElaIconAction(ElaIconType::TrashCan,
+            QStringLiteral("删除 %1 的记录").arg(deletableDates.first().toString(QStringLiteral("yyyy-MM-dd"))));
     }
     else {
-        deleteAction = contextMenu.addAction(QString("删除选中的 %1 条记录").arg(deletableDates.size()));
+        deleteAction = contextMenu.addElaIconAction(ElaIconType::TrashCan,
+            QStringLiteral("删除选中的 %1 条记录").arg(deletableDates.size()));
     }
-    deleteAction->setIcon(style()->standardIcon(QStyle::SP_TrashIcon));
 
-    // 显示菜单并处理选择
     QAction* selectedAction = contextMenu.exec(m_tableView->viewport()->mapToGlobal(pos));
-    if (selectedAction == deleteAction) {
+    if (copyAction && selectedAction == copyAction) {
+        emit copyRequested(targetDates.first());
+    }
+    else if (deleteAction && selectedAction == deleteAction) {
         emit deleteRequested(deletableDates);
     }
 }
 
-QDate CustomCalendarWidget::dateAt(const QPoint& pos) {
+QDate CustomCalendarWidget::dateAt(const QPoint& pos) const {
     if (!m_tableView) {
         return QDate();
     }

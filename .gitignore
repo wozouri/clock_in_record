@@ -58,3 +58,15 @@ attendance_backup_*.json
 Thumbs.db
 \346\211\223\345\214\205/
 /CMakeLists.txt.user
+
+# Vendored ElaWidgetTools SDK runtime artifacts.
+!third_party/
+!third_party/ElaWidgetTools/
+!third_party/ElaWidgetTools/LICENSE
+!third_party/ElaWidgetTools/CMakeLists.txt
+!third_party/ElaWidgetTools/include/
+!third_party/ElaWidgetTools/include/*.h
+!third_party/ElaWidgetTools/lib/
+!third_party/ElaWidgetTools/lib/ElaWidgetTools.lib
+!third_party/ElaWidgetTools/bin/
+!third_party/ElaWidgetTools/bin/ElaWidgetTools.dll

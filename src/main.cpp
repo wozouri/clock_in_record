@@ -6,6 +6,9 @@
 #include <QIcon>
 #include <QTextStream>
 
+#include <ElaApplication.h>
+#include <ElaTheme.h>
+
 #ifdef Q_OS_WIN
 #include <Windows.h>
 #endif
@@ -34,9 +37,13 @@ int main(int argc, char* argv[])
     qInstallMessageHandler(messageOutput);
 
     app.setWindowIcon(QIcon(":/Icons/logo.ico"));
-    app.setApplicationName("AttendanceApp");
+    app.setApplicationName("AttendanceApp"); // Keep the existing application data location.
+    app.setApplicationDisplayName(QStringLiteral("工时簿"));
     app.setOrganizationName("MyCompany");
     app.setApplicationVersion("1.0.0");
+
+    eApp->init();
+    eTheme->setThemeMode(ElaThemeType::Light);
 
     QFont font = app.font();
     font.setFamily("Microsoft YaHei");
