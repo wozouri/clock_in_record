@@ -27,7 +27,8 @@ int main(int argc, char* argv[])
 {
     QApplication app(argc, argv);
 
-#ifdef Q_OS_WIN
+#if defined(Q_OS_WIN) && defined(_DEBUG)
+    // 仅调试构建挂接控制台查看日志输出，发布构建不再弹出命令行窗口。
     AllocConsole();
     FILE* fp;
     freopen_s(&fp, "CONIN$", "r", stdin);
