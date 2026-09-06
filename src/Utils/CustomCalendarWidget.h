@@ -10,7 +10,7 @@
 
 class QRubberBand;
 
-// �Զ��������ؼ���֧���Ҽ��˵�
+// 自定义日历控件，支持右键菜单
 class CustomCalendarWidget : public QCalendarWidget {
     Q_OBJECT
     QMap<QDate, QVariantMap> m_data;
