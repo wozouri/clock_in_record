@@ -303,7 +303,7 @@ private:
 };
 
 AttendanceMainWindow::AttendanceMainWindow(QWidget* parent) : ElaWindow(parent) {
-    setWindowTitle(QStringLiteral("工时簿"));
+    setWindowTitle(QStringLiteral("工时簿 v%1").arg(QCoreApplication::applicationVersion()));
     setMinimumSize(1040, 680);
     resize(1180, 760);
 
