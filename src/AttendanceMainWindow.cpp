@@ -543,6 +543,25 @@ void AttendanceMainWindow::setupUI() {
     auto* copyBtn = createToolbarButton(QStringLiteral("复制"), ElaIconType::Clipboard);
     m_copySelectedButton = copyBtn;
     connect(copyBtn, &ElaPushButton::clicked, this, &AttendanceMainWindow::onCopySelectedClicked);
+    // 操作级撤销/重做（与 Ctrl+Z / Ctrl+Y 同一动作），与考勤操作按钮之间用分隔符隔开
+    m_routeBackButton = new ElaIconButton(ElaIconType::ArrowRotateLeft, 15, 34, 34, toolbar);
+    m_routeBackButton->setCursor(Qt::PointingHandCursor);
+    m_routeBackButton->setToolTip(QStringLiteral("撤销 (Ctrl+Z)"));
+    m_routeBackButton->setLightIconColor(QColor(QStringLiteral("#223550")));
+    m_routeBackButton->setDarkIconColor(QColor(QStringLiteral("#dfe7ef")));
+    m_routeBackButton->setEnabled(false);
+    m_routeForwardButton = new ElaIconButton(ElaIconType::ArrowRotateRight, 15, 34, 34, toolbar);
+    m_routeForwardButton->setCursor(Qt::PointingHandCursor);
+    m_routeForwardButton->setToolTip(QStringLiteral("重做 (Ctrl+Y)"));
+    m_routeForwardButton->setLightIconColor(QColor(QStringLiteral("#223550")));
+    m_routeForwardButton->setDarkIconColor(QColor(QStringLiteral("#dfe7ef")));
+    m_routeForwardButton->setEnabled(false);
+    auto* routeSeparator = new QWidget(toolbar);
+    routeSeparator->setFixedSize(1, 22);
+    routeSeparator->setStyleSheet(QStringLiteral("background: #dce5ee;"));
+    toolbarLayout->addWidget(m_routeBackButton);
+    toolbarLayout->addWidget(m_routeForwardButton);
+    toolbarLayout->addWidget(routeSeparator);
     toolbarLayout->addWidget(copyBtn);
 
     auto* applyBtn = createToolbarButton(QStringLiteral("粘贴"), ElaIconType::ClipboardCheck);
@@ -677,6 +696,9 @@ void AttendanceMainWindow::setupUI() {
         updateUndoRedoActionState();
     });
     addAction(m_redoAction);
+
+    connect(m_routeBackButton, &ElaIconButton::clicked, m_undoAction, &QAction::trigger);
+    connect(m_routeForwardButton, &ElaIconButton::clicked, m_redoAction, &QAction::trigger);
 
     QAction* deleteAction = new QAction(this);
     deleteAction->setShortcut(QKeySequence(Qt::Key_Delete));
@@ -994,6 +1016,12 @@ void AttendanceMainWindow::updateUndoRedoActionState() {
     }
     if (m_redoAction) {
         m_redoAction->setEnabled(!m_redoStack.isEmpty());
+    }
+    if (m_routeBackButton) {
+        m_routeBackButton->setEnabled(!m_undoStack.isEmpty());
+    }
+    if (m_routeForwardButton) {
+        m_routeForwardButton->setEnabled(!m_redoStack.isEmpty());
     }
 }
 

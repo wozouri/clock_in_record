@@ -127,6 +127,8 @@ private:
     QWidget* m_updateToolsHost = nullptr;
     ElaToolButton* m_updateCheckButton = nullptr;
     ElaIconButton* m_updateIndicatorButton = nullptr;
+    ElaIconButton* m_routeBackButton = nullptr;
+    ElaIconButton* m_routeForwardButton = nullptr;
     QDialog* m_updateProgressDialog = nullptr;
     QWidget* m_updateOverlay = nullptr;
     AttendanceUpdateBar* m_updateProgressBar = nullptr;
