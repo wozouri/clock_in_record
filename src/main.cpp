@@ -41,7 +41,7 @@ int main(int argc, char* argv[])
     app.setApplicationName("AttendanceApp"); // Keep the existing application data location.
     app.setApplicationDisplayName(QStringLiteral("工时簿"));
     app.setOrganizationName("MyCompany");
-    app.setApplicationVersion("1.0.0");
+    app.setApplicationVersion("2026.09.06");
 
     eApp->init();
     eTheme->setThemeMode(ElaThemeType::Light);
