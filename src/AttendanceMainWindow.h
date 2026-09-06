@@ -2,6 +2,7 @@
 #define ATTENDANCEMAINWINDOW_H
 
 #include "Types/AttendanceTypes.h"
+#include "Update/UpdateChecker.h"
 #include <ElaWindow.h>
 #include <QLabel>
 #include <QDate>
@@ -12,8 +13,15 @@ class CustomCalendarWidget;
 class WorkScheduleSettingsPage;
 struct MonthlyAttendanceSnapshot;
 class QAction;
+class QDialog;
+class QLabel;
 class QPushButton;
+class ElaContentDialog;
+class ElaIconButton;
 class ElaTeachingTip;
+class ElaToolButton;
+class UpdateChecker;
+class AttendanceUpdateBar;
 
 // 主窗口
 class AttendanceMainWindow : public ElaWindow {
@@ -43,6 +51,12 @@ private slots:
     void onApplyCopiedClicked();
     void onSelectAllCurrentMonthRequested();
     void onShowCurrentMonthRequested();
+
+    void onCheckForUpdatesClicked();
+    void onUpdateCheckFinished(const UpdateReleaseInfo& info, bool userInitiated);
+    void onUpdateDownloadProgress(int percent);
+    void onUpdateApplyReady(const QString& version);
+    void onUpdateFailed(const QString& message);
 
 private:
     struct AttendanceRecordState {
@@ -82,6 +96,11 @@ private:
     void processImportFile(const QString& filePath);
     void processExportFile(const QString& filePath);
 
+    void setupUpdateUi();
+    void showUpdateConfirmDialog();
+    void startUpdateDownload();
+    void closeUpdateProgressDialog();
+
     CustomCalendarWidget* m_calendar = nullptr;
     WorkScheduleSettingsPage* m_workScheduleSettingsPage = nullptr;
     QLabel* m_statsLabel = nullptr;
@@ -103,6 +122,17 @@ private:
     bool m_hasCopiedRecord = false;
     QList<AttendanceHistoryEntry> m_undoStack;
     QList<AttendanceHistoryEntry> m_redoStack;
+
+    UpdateChecker* m_updateChecker = nullptr;
+    QWidget* m_updateToolsHost = nullptr;
+    ElaToolButton* m_updateCheckButton = nullptr;
+    ElaIconButton* m_updateIndicatorButton = nullptr;
+    QDialog* m_updateProgressDialog = nullptr;
+    QWidget* m_updateOverlay = nullptr;
+    AttendanceUpdateBar* m_updateProgressBar = nullptr;
+    QLabel* m_updateStatusLabel = nullptr;
+    UpdateReleaseInfo m_availableUpdate;
+    bool m_hasAvailableUpdate = false;
 };
 
 #endif // ATTENDANCEMAINWINDOW_H

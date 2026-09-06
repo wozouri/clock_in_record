@@ -14,15 +14,24 @@
 #include <QMessageBox>
 #include <QPushButton>
 #include <QFileDialog>
+#include <QApplication>
 #include <QAction>
 #include <QKeySequence>
 #include <QTimer>
+#include <ElaContentDialog.h>
+#include <ElaIconButton.h>
+#include <QPainter>
+#include <QPainterPath>
+#include <QVariantAnimation>
+#include <QScreen>
+#include <ElaToolButton.h>
 #include <ElaIcon.h>
 #include <ElaAppBar.h>
 #include <ElaMessageBar.h>
 #include <ElaNavigationBar.h>
 #include <ElaPushButton.h>
 #include <ElaTeachingTip.h>
+#include "Update/UpdateChecker.h"
 #include <algorithm>
 
 #ifdef Q_OS_WIN
@@ -68,7 +77,230 @@ QString recordTipSummary(const QDate& date, const AttendanceRecord& record) {
              workdayMarker);
 }
 
+// 叠加在 ElaTeachingTip 上的呼吸灯描边层：蓝色圆角边框周期性明暗，让悬浮提示更醒目。
+class TipGlowBorder final : public QWidget {
+public:
+    explicit TipGlowBorder(ElaTeachingTip* tip)
+        : QWidget(tip), m_tip(tip) {
+        setAttribute(Qt::WA_TransparentForMouseEvents);
+        setGeometry(tip->rect());
+        tip->installEventFilter(this);
+        raise();
+        auto* breath = new QVariantAnimation(this);
+        breath->setDuration(1600);
+        breath->setLoopCount(-1);
+        breath->setKeyValueAt(0.0, 0.0);
+        breath->setKeyValueAt(0.5, 1.0);
+        breath->setKeyValueAt(1.0, 0.0);
+        connect(breath, &QVariantAnimation::valueChanged, this, [this](const QVariant& value) {
+            m_breath = value.toDouble();
+            update();
+        });
+        breath->start();
+    }
+
+protected:
+    bool eventFilter(QObject* watched, QEvent* event) override {
+        if (watched == parentWidget() && event->type() == QEvent::Resize) {
+            setGeometry(0, 0, parentWidget()->width(), parentWidget()->height());
+        }
+        return QWidget::eventFilter(watched, event);
+    }
+
+    void paintEvent(QPaintEvent*) override {
+        // 与 ElaTeachingTip 绘制保持一致：本体 = 窗口内缩 8px 的 8px 圆角矩形，
+        // 尾巴 = 从本体边缘中心伸出的 8px 三角。
+        const QRect bodyRect = rect().adjusted(8, 8, -8, -8);
+        const QColor glowColor(23, 105, 170);
+        const double factor = 0.5 + 0.5 * m_breath;  // 呼吸系数 0.5..1.0
+
+        const QPainterPath shape = silhouettePath(bodyRect);
+
+        QPainter painter(this);
+        painter.setRenderHint(QPainter::Antialiasing, true);
+        painter.setBrush(Qt::NoBrush);
+        // 三层外晕：宽度递减、浓度递增，叠出柔和光晕
+        const struct HaloPass {
+            double width;
+            int alpha;
+        } passes[] = {{7.0, 26}, {5.0, 48}, {3.0, 85}};
+        for (const HaloPass& pass : passes) {
+            QColor color = glowColor;
+            color.setAlpha(int(pass.alpha * factor));
+            painter.setPen(QPen(color, pass.width));
+            painter.drawPath(shape);
+        }
+        // 主描边贴住本体轮廓
+        QColor mainColor = glowColor;
+        mainColor.setAlpha(int(200 * factor));
+        painter.setPen(QPen(mainColor, 2));
+        painter.drawPath(shape);
+    }
+
+private:
+    QPainterPath silhouettePath(const QRect& bodyRect) const {
+        QPainterPath path;
+        path.addRoundedRect(bodyRect, 8, 8);
+        const int tailSize = 8;
+        QPainterPath tail;
+        switch (resolveTail()) {
+            case ElaTeachingTip::Bottom: {
+                const int cx = width() / 2;
+                const int by = bodyRect.bottom();
+                tail.moveTo(cx - tailSize, by);
+                tail.lineTo(cx, by + tailSize);
+                tail.lineTo(cx + tailSize, by);
+                tail.closeSubpath();
+                break;
+            }
+            case ElaTeachingTip::Top: {
+                const int cx = width() / 2;
+                const int ty = bodyRect.top();
+                tail.moveTo(cx - tailSize, ty);
+                tail.lineTo(cx, ty - tailSize);
+                tail.lineTo(cx + tailSize, ty);
+                tail.closeSubpath();
+                break;
+            }
+            case ElaTeachingTip::Left: {
+                const int lx = bodyRect.left();
+                const int cy = height() / 2;
+                tail.moveTo(lx, cy - tailSize);
+                tail.lineTo(lx - tailSize, cy);
+                tail.lineTo(lx, cy + tailSize);
+                tail.closeSubpath();
+                break;
+            }
+            case ElaTeachingTip::Right: {
+                const int rx = bodyRect.right();
+                const int cy = height() / 2;
+                tail.moveTo(rx, cy - tailSize);
+                tail.lineTo(rx + tailSize, cy);
+                tail.lineTo(rx, cy + tailSize);
+                tail.closeSubpath();
+                break;
+            }
+            default:
+                break;
+        }
+        return tail.isEmpty() ? path : path.united(tail);
+    }
+
+    // 复刻 ElaTeachingTip 的 Auto 尾向解析，保证描边和提示自身尾巴同向。
+    ElaTeachingTip::TailPosition resolveTail() const {
+        if (m_tip->getTailPosition() != ElaTeachingTip::Auto) {
+            return m_tip->getTailPosition();
+        }
+        QWidget* target = m_tip->getTarget();
+        if (!target) {
+            return ElaTeachingTip::Bottom;
+        }
+        const QPoint topLeft = target->mapToGlobal(QPoint(0, 0));
+        QScreen* screen = QApplication::screenAt(topLeft);
+        if (!screen) {
+            return ElaTeachingTip::Bottom;
+        }
+        const QRect screenGeo = screen->availableGeometry();
+        const QRect targetRect(topLeft, target->size());
+        const QSize tipSize = size();
+        const int margin = 12;
+        const int spaceAbove = targetRect.top() - screenGeo.top() - margin - tipSize.height();
+        const int spaceBelow = screenGeo.bottom() - targetRect.bottom() - margin - tipSize.height();
+        const int spaceLeft = targetRect.left() - screenGeo.left() - margin - tipSize.width();
+        const int spaceRight = screenGeo.right() - targetRect.right() - margin - tipSize.width();
+        const int centerY = targetRect.center().y();
+        const bool horizontalFits = (centerY - tipSize.height() / 2 >= screenGeo.top())
+            && (centerY + tipSize.height() / 2 <= screenGeo.bottom());
+        const int unavailable = -1000000000;
+        struct Candidate {
+            ElaTeachingTip::TailPosition position;
+            int space;
+        };
+        const Candidate candidates[] = {
+            {ElaTeachingTip::Bottom, spaceAbove},
+            {ElaTeachingTip::Top, spaceBelow},
+            {ElaTeachingTip::Right, horizontalFits ? spaceLeft : unavailable},
+            {ElaTeachingTip::Left, horizontalFits ? spaceRight : unavailable},
+        };
+        const Candidate* best = &candidates[0];
+        for (const Candidate& candidate : candidates) {
+            if (candidate.space > best->space) {
+                best = &candidate;
+            }
+        }
+        return best->position;
+    }
+
+    ElaTeachingTip* m_tip = nullptr;
+    double m_breath = 0.0;
+};
+
+void attachTipGlow(ElaTeachingTip* tip) {
+    new TipGlowBorder(tip);
 }
+
+// 工具栏锚定的提示优先上/下展开（不遮挡同行按钮），仅按屏幕上下空间取舍；
+// 实在放不下时由 ElaTeachingTip 自身的边界钳制兜底。
+ElaTeachingTip::TailPosition preferredTipTail(ElaTeachingTip* tip) {
+    QWidget* target = tip->getTarget();
+    if (!target) {
+        return ElaTeachingTip::Bottom;
+    }
+    const QPoint topLeft = target->mapToGlobal(QPoint(0, 0));
+    QScreen* screen = QApplication::screenAt(topLeft);
+    if (!screen) {
+        return ElaTeachingTip::Bottom;
+    }
+    const QRect screenGeo = screen->availableGeometry();
+    const QRect targetRect(topLeft, target->size());
+    const int tipHeight = tip->height() > 40 ? tip->height() : 180;
+    const int needed = tipHeight + 12;
+    const int spaceAbove = targetRect.top() - screenGeo.top();
+    const int spaceBelow = screenGeo.bottom() - targetRect.bottom();
+    if (spaceAbove >= needed) {
+        return ElaTeachingTip::Bottom;
+    }
+    if (spaceBelow >= needed) {
+        return ElaTeachingTip::Top;
+    }
+    return spaceAbove >= spaceBelow ? ElaTeachingTip::Bottom : ElaTeachingTip::Top;
+}
+
+}  // namespace
+
+// 自绘下载进度条（参考 LUBAN ClientUpdateProgressBar）：8px 高，无文字，方形填充。
+// 定义在全局命名空间，与 AttendanceMainWindow.h 中的前置声明匹配。
+class AttendanceUpdateBar final : public QWidget {
+public:
+    explicit AttendanceUpdateBar(QWidget* parent = nullptr)
+        : QWidget(parent) {
+        setFixedHeight(8);
+        setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    }
+
+    void setPercent(int percent) {
+        const int boundedPercent = qBound(0, percent, 100);
+        if (m_percent != boundedPercent) {
+            m_percent = boundedPercent;
+            update();
+        }
+    }
+
+protected:
+    void paintEvent(QPaintEvent*) override {
+        QPainter painter(this);
+        painter.setRenderHint(QPainter::Antialiasing, false);
+        painter.fillRect(rect(), QColor(QStringLiteral("#DCE5F0")));
+        if (m_percent > 0) {
+            const int filledWidth = qRound(width() * m_percent / 100.0);
+            painter.fillRect(QRect(0, 0, filledWidth, height()),
+                QColor(QStringLiteral("#2E6FD8")));
+        }
+    }
+
+private:
+    int m_percent = 0;
+};
 
 AttendanceMainWindow::AttendanceMainWindow(QWidget* parent) : ElaWindow(parent) {
     setWindowTitle(QStringLiteral("工时簿"));
@@ -98,6 +330,8 @@ AttendanceMainWindow::AttendanceMainWindow(QWidget* parent) : ElaWindow(parent) 
             }
         }
     }
+
+    setupUpdateUi();
 
     // ElaWindow completes its internal layout during setupUI; apply the usable size floor afterwards.
     setMinimumSize(kMinimumWindowWidth, kMinimumWindowHeight);
@@ -149,13 +383,15 @@ bool AttendanceMainWindow::eventFilter(QObject* watched, QEvent* event) {
         if (event->type() == QEvent::Enter) {
             if (!m_statsContextTip) {
                 m_statsContextTip = new ElaTeachingTip(this);
-                m_statsContextTip->setTailPosition(ElaTeachingTip::Bottom);
+                m_statsContextTip->setTailPosition(ElaTeachingTip::Auto);
                 m_statsContextTip->setTarget(m_statsLabel);
                 m_statsContextTip->setIsLightDismiss(false);
                 m_statsContextTip->setCloseButtonVisible(false);
+                attachTipGlow(m_statsContextTip);
             }
             m_statsContextTip->setTitle(QStringLiteral("月度统计"));
             m_statsContextTip->setContent(m_monthlyStatsText);
+            m_statsContextTip->setTailPosition(preferredTipTail(m_statsContextTip));
             m_statsContextTip->showTip();
         } else if (event->type() == QEvent::Leave && m_statsContextTip) {
             m_statsContextTip->closeTip();
@@ -286,6 +522,10 @@ void AttendanceMainWindow::setupUI() {
         button->setIconSize(QSize(15, 15));
         button->setFixedHeight(34);
         button->setCursor(Qt::PointingHandCursor);
+        // 新版 ElaPushButton 在样式生效前后 sizeHint 会变化，布局可能缓存旧值；
+        // 按图标+间距+文字+内边距显式给定最小宽度，避免个别按钮被压窄裁字。
+        button->setMinimumWidth(button->iconSize().width() + 6
+            + button->fontMetrics().horizontalAdvance(text) + 26);
         button->setStyleSheet(QStringLiteral(
             "QPushButton { background: #ffffff; color: #223550; border: 1px solid #d8e1eb;"
             " border-radius: 5px; padding: 0 13px; }"
@@ -838,15 +1078,17 @@ void AttendanceMainWindow::updateContextTips(const QList<QDate>& dates) {
         const AttendanceRecord record = AttendanceStorage::loadRecord(date);
         if (!m_copyContextTip) {
             m_copyContextTip = new ElaTeachingTip(this);
-            m_copyContextTip->setTailPosition(ElaTeachingTip::Bottom);
+            m_copyContextTip->setTailPosition(ElaTeachingTip::Auto);
             m_copyContextTip->setTarget(m_copySelectedButton);
             m_copyContextTip->setIsLightDismiss(false);
             m_copyContextTip->setCloseButtonVisible(false);
             m_copyContextTip->setStyleSheet(QStringLiteral(
                 "ElaTeachingTip QLabel { color: #1f2937; }"));
+            attachTipGlow(m_copyContextTip);
         }
         m_copyContextTip->setTitle(recordTipSummary(date, record));
         m_copyContextTip->setContent(QString());
+        m_copyContextTip->setTailPosition(preferredTipTail(m_copyContextTip));
         m_copyContextTip->showTip();
     } else if (m_copyContextTip) {
         m_copyContextTip->closeTip();
@@ -855,15 +1097,17 @@ void AttendanceMainWindow::updateContextTips(const QList<QDate>& dates) {
     if (m_hasCopiedRecord) {
         if (!m_applyContextTip) {
             m_applyContextTip = new ElaTeachingTip(this);
-            m_applyContextTip->setTailPosition(ElaTeachingTip::Bottom);
+            m_applyContextTip->setTailPosition(ElaTeachingTip::Auto);
             m_applyContextTip->setTarget(m_applyCopiedButton);
             m_applyContextTip->setIsLightDismiss(false);
             m_applyContextTip->setCloseButtonVisible(false);
             m_applyContextTip->setStyleSheet(QStringLiteral(
                 "ElaTeachingTip QLabel { color: #1f2937; }"));
+            attachTipGlow(m_applyContextTip);
         }
         m_applyContextTip->setTitle(recordTipSummary(m_copiedFromDate, m_copiedRecord));
         m_applyContextTip->setContent(QString());
+        m_applyContextTip->setTailPosition(preferredTipTail(m_applyContextTip));
         m_applyContextTip->showTip();
     } else if (m_applyContextTip) {
         m_applyContextTip->closeTip();
@@ -953,3 +1197,229 @@ void AttendanceMainWindow::updateMonthlyStatistics(const MonthlyAttendanceSnapsh
     m_monthlyStatsText = stats;
     m_statsLabel->setText(QString("平均加班 %1 小时").arg(averageOvertime));
 }
+
+void AttendanceMainWindow::setupUpdateUi() {
+    m_updateChecker = new UpdateChecker(this);
+
+    m_updateToolsHost = new QWidget(this);
+    m_updateToolsHost->setFixedHeight(48);
+    auto* toolsLayout = new QHBoxLayout(m_updateToolsHost);
+    toolsLayout->setContentsMargins(4, 0, 4, 0);
+    toolsLayout->setSpacing(2);
+
+    const auto makeAppBarButton = [this](ElaIconType::IconName icon) {
+        auto* button = new ElaToolButton(m_updateToolsHost);
+        button->setElaIcon(icon);
+        button->setFixedSize(40, 48);
+        button->setCursor(Qt::PointingHandCursor);
+        return button;
+    };
+    m_updateCheckButton = makeAppBarButton(ElaIconType::ArrowsRotate);
+    m_updateCheckButton->setToolTip(QStringLiteral("检查更新"));
+    // 角标用 ElaIconButton 以支持醒目的独立配色；更新就绪时常亮绿色。
+    m_updateIndicatorButton =
+        new ElaIconButton(ElaIconType::CloudArrowDown, 18, 40, 48, m_updateToolsHost);
+    m_updateIndicatorButton->setCursor(Qt::PointingHandCursor);
+    m_updateIndicatorButton->setLightIconColor(QColor(QStringLiteral("#1AA229")));
+    m_updateIndicatorButton->setLightHoverIconColor(QColor(QStringLiteral("#128020")));
+    m_updateIndicatorButton->setDarkIconColor(QColor(QStringLiteral("#3DD05C")));
+    m_updateIndicatorButton->setDarkHoverIconColor(QColor(QStringLiteral("#6BE384")));
+    m_updateIndicatorButton->setVisible(false);
+    toolsLayout->addWidget(m_updateCheckButton);
+    toolsLayout->addWidget(m_updateIndicatorButton);
+    setCustomWidget(ElaAppBarType::RightArea, m_updateToolsHost);
+    // 在自定义区域前插入弹性空隙，使其紧贴最小化/关闭按钮。
+    if (auto* hostAppBar = qobject_cast<ElaAppBar*>(m_updateToolsHost->parentWidget())) {
+        if (auto* boxLayout = qobject_cast<QBoxLayout*>(hostAppBar->layout())) {
+            const int hostIndex = boxLayout->indexOf(m_updateToolsHost);
+            if (hostIndex >= 0) {
+                boxLayout->insertStretch(hostIndex);
+            }
+        }
+    }
+
+    connect(m_updateCheckButton, &ElaToolButton::clicked,
+        this, &AttendanceMainWindow::onCheckForUpdatesClicked);
+    connect(m_updateIndicatorButton, &ElaIconButton::clicked,
+        this, &AttendanceMainWindow::showUpdateConfirmDialog);
+    connect(m_updateChecker, &UpdateChecker::checkFinished,
+        this, &AttendanceMainWindow::onUpdateCheckFinished);
+    connect(m_updateChecker, &UpdateChecker::downloadProgress,
+        this, &AttendanceMainWindow::onUpdateDownloadProgress);
+    connect(m_updateChecker, &UpdateChecker::applyReady,
+        this, &AttendanceMainWindow::onUpdateApplyReady);
+    connect(m_updateChecker, &UpdateChecker::failed,
+        this, &AttendanceMainWindow::onUpdateFailed);
+
+    // 重启后读取"待更新"标记，提示本次更新已完成。
+    const QString pendingVersion = UpdateChecker::takePendingUpdateVersion();
+    if (!pendingVersion.isEmpty()) {
+        QTimer::singleShot(600, this, [this, pendingVersion] {
+            ElaMessageBar::success(ElaMessageBarType::Top, QStringLiteral("更新"),
+                QStringLiteral("已更新到版本 %1").arg(pendingVersion), 4000, this);
+        });
+    }
+    // 启动后静默检查一次更新；有新版本只亮角标，不打扰。
+    QTimer::singleShot(3000, this, [this] {
+        if (!m_updateChecker->isDownloadInProgress()) {
+            m_updateChecker->checkForUpdates(false);
+        }
+    });
+}
+
+void AttendanceMainWindow::onCheckForUpdatesClicked() {
+    if (m_updateChecker->isDownloadInProgress()) {
+        return;
+    }
+    m_updateCheckButton->setEnabled(false);
+    m_updateChecker->checkForUpdates(true);
+}
+
+void AttendanceMainWindow::onUpdateCheckFinished(const UpdateReleaseInfo& info, bool userInitiated) {
+    m_updateCheckButton->setEnabled(true);
+    m_availableUpdate = info;
+    m_hasAvailableUpdate = info.available && info.isNewer;
+    m_updateIndicatorButton->setVisible(m_hasAvailableUpdate);
+    if (m_hasAvailableUpdate) {
+        m_updateIndicatorButton->setToolTip(
+            QStringLiteral("发现新版本 %1，点击更新").arg(info.version));
+        if (userInitiated) {
+            ElaMessageBar::success(ElaMessageBarType::Top, QStringLiteral("检查更新"),
+                QStringLiteral("发现新版本 %1，请点击标题栏的下载图标。").arg(info.version),
+                4000, this);
+        }
+    }
+    else if (userInitiated) {
+        if (!info.errorMessage.isEmpty()) {
+            ElaMessageBar::warning(ElaMessageBarType::Top, QStringLiteral("检查更新"),
+                info.errorMessage, 4000, this);
+        }
+        else {
+            ElaMessageBar::information(ElaMessageBarType::Top, QStringLiteral("检查更新"),
+                QStringLiteral("当前已是最新版本。"), 3000, this);
+        }
+    }
+}
+
+void AttendanceMainWindow::showUpdateConfirmDialog() {
+    if (!m_hasAvailableUpdate || m_updateChecker->isDownloadInProgress()) {
+        return;
+    }
+    auto* dialog = new ElaContentDialog(this);
+    dialog->setAttribute(Qt::WA_DeleteOnClose);
+    dialog->setTitleText(QStringLiteral("发现新版本 %1").arg(m_availableUpdate.version));
+    dialog->setSubTitleText(m_availableUpdate.notes.isEmpty()
+        ? QStringLiteral("是否下载并安装更新？更新完成后程序将自动重启。")
+        : m_availableUpdate.notes);
+    dialog->setLeftButtonText(QStringLiteral("取消"));
+    dialog->setMiddleButtonVisible(false);
+    dialog->setRightButtonText(QStringLiteral("更新并重启"));
+    connect(dialog, &ElaContentDialog::rightButtonClicked, this, [this, dialog] {
+        dialog->close();
+        startUpdateDownload();
+    });
+    dialog->exec();
+}
+
+void AttendanceMainWindow::startUpdateDownload() {
+    // 无边框置顶下载弹窗，样式与 LUBAN 客户端更新一致。
+    auto* progressDialog = new QDialog(nullptr);
+    progressDialog->setWindowTitle(QStringLiteral("客户端更新"));
+    progressDialog->setWindowModality(Qt::ApplicationModal);
+    progressDialog->setWindowFlags(Qt::Dialog | Qt::FramelessWindowHint
+        | Qt::WindowStaysOnTopHint);
+    progressDialog->setFixedSize(440, 198);
+    progressDialog->setObjectName(QStringLiteral("clientUpdateProgress"));
+    progressDialog->setAttribute(Qt::WA_DeleteOnClose);
+    progressDialog->setStyleSheet(QStringLiteral(
+        "QDialog#clientUpdateProgress { background: #F7FAFC; border: 1px solid #D6DFEA; }"
+        "QLabel#updateTitle { color: #13213A; font-size: 17px; font-weight: 600; }"
+        "QLabel#updateStatus { color: #53647A; font-size: 13px; }"
+        "QPushButton { color: #244B82; background: transparent; border: 1px solid #C5D3E4;"
+        " padding: 6px 18px; }"
+        "QPushButton:hover { background: #E8F0FA; }"));
+
+    auto* layout = new QVBoxLayout(progressDialog);
+    layout->setContentsMargins(26, 24, 26, 20);
+    layout->setSpacing(10);
+    auto* titleLabel = new QLabel(QStringLiteral("客户端更新"), progressDialog);
+    titleLabel->setObjectName(QStringLiteral("updateTitle"));
+    auto* statusLabel = new QLabel(QStringLiteral("正在准备下载最新版本..."), progressDialog);
+    statusLabel->setObjectName(QStringLiteral("updateStatus"));
+    auto* progressBar = new AttendanceUpdateBar(progressDialog);
+    auto* progressRow = new QHBoxLayout;
+    progressRow->addWidget(progressBar, 1);
+    auto* actionRow = new QHBoxLayout;
+    actionRow->addStretch();
+    auto* cancelButton = new QPushButton(QStringLiteral("取消下载"), progressDialog);
+    cancelButton->setCursor(Qt::PointingHandCursor);
+    actionRow->addWidget(cancelButton);
+    layout->addWidget(titleLabel);
+    layout->addWidget(statusLabel);
+    layout->addLayout(progressRow);
+    layout->addStretch();
+    layout->addLayout(actionRow);
+
+    m_updateProgressDialog = progressDialog;
+    m_updateProgressBar = progressBar;
+    m_updateStatusLabel = statusLabel;
+
+    // 背景遮罩：半透明深色盖住主窗口，参考 LUBAN clientUpdateOverlay。
+    m_updateOverlay = new QWidget(this);
+    m_updateOverlay->setObjectName(QStringLiteral("clientUpdateOverlay"));
+    m_updateOverlay->setAttribute(Qt::WA_StyledBackground);
+    m_updateOverlay->setGeometry(rect());
+    m_updateOverlay->setStyleSheet(QStringLiteral(
+        "QWidget#clientUpdateOverlay { background: rgba(24, 39, 62, 72); }"));
+    m_updateOverlay->show();
+    m_updateOverlay->raise();
+
+    connect(cancelButton, &QPushButton::clicked, this, [this] {
+        m_updateChecker->cancelDownload();
+    });
+    progressDialog->show();
+    // 弹窗居中到主窗口。
+    progressDialog->move(geometry().center().x() - progressDialog->width() / 2,
+        geometry().center().y() - progressDialog->height() / 2);
+    progressDialog->raise();
+    progressDialog->activateWindow();
+
+    m_updateChecker->startDownload();
+}
+
+void AttendanceMainWindow::onUpdateDownloadProgress(int percent) {
+    if (m_updateProgressBar != nullptr) {
+        m_updateProgressBar->setPercent(percent);
+    }
+    if (m_updateStatusLabel != nullptr) {
+        m_updateStatusLabel->setText(QStringLiteral("正在下载客户端更新... %1%").arg(percent));
+    }
+}
+
+void AttendanceMainWindow::onUpdateApplyReady(const QString& version) {
+    closeUpdateProgressDialog();
+    ElaMessageBar::success(ElaMessageBarType::Top, QStringLiteral("更新"),
+        QStringLiteral("版本 %1 已就绪，程序将自动重启。").arg(version), 3000, this);
+    QTimer::singleShot(800, qApp, &QCoreApplication::quit);
+}
+
+void AttendanceMainWindow::onUpdateFailed(const QString& message) {
+    closeUpdateProgressDialog();
+    ElaMessageBar::warning(ElaMessageBarType::Top, QStringLiteral("更新"), message, 4000, this);
+}
+
+void AttendanceMainWindow::closeUpdateProgressDialog() {
+    if (m_updateProgressDialog != nullptr) {
+        m_updateProgressDialog->close();
+        m_updateProgressDialog->deleteLater();
+        m_updateProgressDialog = nullptr;
+        m_updateProgressBar = nullptr;
+        m_updateStatusLabel = nullptr;
+    }
+    if (m_updateOverlay != nullptr) {
+        m_updateOverlay->hide();
+        m_updateOverlay->deleteLater();
+        m_updateOverlay = nullptr;
+    }
+}
+
