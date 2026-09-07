@@ -453,10 +453,16 @@ void AttendanceMainWindow::onMonthChanged() {
 }
 
 void AttendanceMainWindow::onDeleteRequested(const QList<QDate>& dates) {
+    if (m_calendar->isYearOverviewVisible()) {
+        return;
+    }
     deleteAttendanceRecords(dates);
 }
 
 void AttendanceMainWindow::onDeleteSelectionRequested() {
+    if (m_calendar->isYearOverviewVisible()) {
+        return;
+    }
     deleteAttendanceRecords(m_calendar->selectedDates());
 }
 
@@ -772,8 +778,17 @@ void AttendanceMainWindow::setupUI() {
     // 连接信号
     connect(m_calendar, &CustomCalendarWidget::dateDoubleClicked, this, &AttendanceMainWindow::onDateDoubleClicked);
     connect(m_calendar, &CustomCalendarWidget::selectionChanged, this, &AttendanceMainWindow::onSelectionChanged);
-    connect(m_calendar, &QCalendarWidget::currentPageChanged,
+    connect(m_calendar, &CustomCalendarWidget::currentPageChanged,
         this, &AttendanceMainWindow::onMonthChanged);
+    connect(m_calendar, &CustomCalendarWidget::yearOverviewVisibilityChanged,
+        this, [this](bool visible) {
+            m_statsLabel->setVisible(!visible);
+            if (visible && m_statsContextTip) {
+                m_statsContextTip->closeTip();
+            }
+            updateBatchActionState();
+            updateUndoRedoActionState();
+        });
     connect(m_calendar, &CustomCalendarWidget::deleteRequested,
         this, &AttendanceMainWindow::onDeleteRequested);
     connect(m_calendar, &CustomCalendarWidget::copyRequested,
@@ -852,6 +867,10 @@ void AttendanceMainWindow::onSelectionChanged() {
 }
 
 void AttendanceMainWindow::onCopySelectedClicked() {
+    if (m_calendar->isYearOverviewVisible()) {
+        return;
+    }
+
     const QList<QDate> dates = m_calendar->selectedDates();
     if (dates.size() != 1) {
         showStatusMessage(QString("请先单独选中一个日期再复制记录"));
@@ -870,6 +889,9 @@ void AttendanceMainWindow::onCopySelectedClicked() {
 
 void AttendanceMainWindow::onCopyRequested(const QDate& date)
 {
+    if (m_calendar->isYearOverviewVisible()) {
+        return;
+    }
     copyRecord(date);
 }
 
@@ -888,6 +910,10 @@ void AttendanceMainWindow::copyRecord(const QDate& sourceDate)
 }
 
 void AttendanceMainWindow::onApplyCopiedClicked() {
+    if (m_calendar->isYearOverviewVisible()) {
+        return;
+    }
+
     if (!m_hasCopiedRecord) {
         showStatusMessage(QString("请先复制一个日期的记录"));
         return;
@@ -966,6 +992,10 @@ void AttendanceMainWindow::onApplyCopiedClicked() {
 }
 
 void AttendanceMainWindow::onSelectAllCurrentMonthRequested() {
+    if (m_calendar->isYearOverviewVisible()) {
+        return;
+    }
+
     QList<QDate> monthDates;
     const QStringList recordedDateKeys = AttendanceStorage::recordedDates();
     for (const QString& dateKey : recordedDateKeys) {
@@ -1044,22 +1074,41 @@ bool AttendanceMainWindow::applyHistoryEntry(const AttendanceHistoryEntry& entry
 }
 
 void AttendanceMainWindow::updateUndoRedoActionState() {
+    const bool isMonthView = !m_calendar || !m_calendar->isYearOverviewVisible();
     if (m_undoAction) {
-        m_undoAction->setEnabled(!m_undoStack.isEmpty());
+        m_undoAction->setEnabled(isMonthView && !m_undoStack.isEmpty());
     }
     if (m_redoAction) {
-        m_redoAction->setEnabled(!m_redoStack.isEmpty());
+        m_redoAction->setEnabled(isMonthView && !m_redoStack.isEmpty());
     }
     if (m_routeBackButton) {
-        m_routeBackButton->setEnabled(!m_undoStack.isEmpty());
+        m_routeBackButton->setEnabled(isMonthView && !m_undoStack.isEmpty());
     }
     if (m_routeForwardButton) {
-        m_routeForwardButton->setEnabled(!m_redoStack.isEmpty());
+        m_routeForwardButton->setEnabled(isMonthView && !m_redoStack.isEmpty());
     }
 }
 
 void AttendanceMainWindow::updateBatchActionState() {
+    const bool isMonthView = !m_calendar->isYearOverviewVisible();
     const QList<QDate> dates = m_calendar->selectedDates();
+    const QDate today = QDate::currentDate();
+    m_showCurrentMonthButton->setVisible(!isMonthView
+        || m_calendar->yearShown() != today.year()
+        || m_calendar->monthShown() != today.month());
+    if (!isMonthView) {
+        m_copySelectedButton->setEnabled(false);
+        m_applyCopiedButton->setEnabled(false);
+        m_deleteSelectedButton->setEnabled(false);
+        m_selectMonthButton->setEnabled(false);
+        m_copySelectedButton->setToolTip(QStringLiteral("全年预览中不可用"));
+        m_applyCopiedButton->setToolTip(QStringLiteral("全年预览中不可用"));
+        m_deleteSelectedButton->setToolTip(QStringLiteral("全年预览中不可用"));
+        m_selectMonthButton->setToolTip(QStringLiteral("全年预览中不可用"));
+        updateContextTips({});
+        return;
+    }
+
     const bool canCopy = dates.size() == 1 && AttendanceStorage::hasArrivalRecord(dates.first());
     bool canApply = false;
     int targetCount = 0;
@@ -1091,10 +1140,6 @@ void AttendanceMainWindow::updateBatchActionState() {
     m_applyCopiedButton->setEnabled(canApply);
     m_deleteSelectedButton->setEnabled(deletableCount > 0);
     m_selectMonthButton->setEnabled(monthRecordCount > 0);
-    const QDate today = QDate::currentDate();
-    m_showCurrentMonthButton->setVisible(m_calendar->yearShown() != today.year()
-        || m_calendar->monthShown() != today.month());
-
     if (canCopy) {
         m_copySelectedButton->setToolTip(
             QStringLiteral("复制 %1 的记录").arg(dates.first().toString(QStringLiteral("yyyy年M月d日"))));
