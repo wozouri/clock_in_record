@@ -20,6 +20,9 @@ class ElaContentDialog;
 class ElaIconButton;
 class ElaTeachingTip;
 class ElaToolButton;
+class QPropertyAnimation;
+class QResizeEvent;
+class QStackedWidget;
 class UpdateChecker;
 class AttendanceUpdateBar;
 
@@ -33,6 +36,7 @@ public:
 protected:
     void mousePressEvent(QMouseEvent* event) override;
     void moveEvent(QMoveEvent* event) override;
+    void resizeEvent(QResizeEvent* event) override;
     bool eventFilter(QObject* watched, QEvent* event) override;
     Q_TAKEOVER_NATIVEEVENT_H
 
@@ -97,6 +101,11 @@ private:
     void processExportFile(const QString& filePath);
 
     void setupUpdateUi();
+    void setupSettingsPageTransition();
+    void onCentralPageChanged(int index);
+    void startSettingsPageTransition(bool entering, QWidget* backdropPage);
+    void cancelSettingsPageTransition();
+    void finishSettingsPageTransition();
     void showUpdateConfirmDialog();
     void startUpdateDownload();
     void closeUpdateProgressDialog();
@@ -129,6 +138,15 @@ private:
     ElaIconButton* m_updateIndicatorButton = nullptr;
     ElaIconButton* m_routeBackButton = nullptr;
     ElaIconButton* m_routeForwardButton = nullptr;
+    QStackedWidget* m_centralStack = nullptr;
+    QWidget* m_currentCentralPage = nullptr;
+    QWidget* m_settingsRoutePage = nullptr;
+    QWidget* m_settingsTransitionBackdrop = nullptr;
+    QWidget* m_settingsOverlay = nullptr;
+    QWidget* m_settingsTransitionBlocker = nullptr;
+    QPropertyAnimation* m_settingsPageAnimation = nullptr;
+    bool m_isSettingsPageTransitioning = false;
+    bool m_isSettingsPageEntering = false;
     QDialog* m_updateProgressDialog = nullptr;
     QWidget* m_updateOverlay = nullptr;
     AttendanceUpdateBar* m_updateProgressBar = nullptr;

@@ -22,6 +22,9 @@
 #include <ElaIconButton.h>
 #include <QPainter>
 #include <QPainterPath>
+#include <QPropertyAnimation>
+#include <QResizeEvent>
+#include <QStackedWidget>
 #include <QVariantAnimation>
 #include <QScreen>
 #include <ElaToolButton.h>
@@ -332,6 +335,7 @@ AttendanceMainWindow::AttendanceMainWindow(QWidget* parent) : ElaWindow(parent) 
     }
 
     setupUpdateUi();
+    setupSettingsPageTransition();
 
     // ElaWindow completes its internal layout during setupUI; apply the usable size floor afterwards.
     setMinimumSize(kMinimumWindowWidth, kMinimumWindowHeight);
@@ -363,6 +367,24 @@ void AttendanceMainWindow::moveEvent(QMoveEvent* event) {
         m_contextTipRefreshPending = false;
         refreshContextTipPositions();
     });
+}
+
+void AttendanceMainWindow::resizeEvent(QResizeEvent* event) {
+    ElaWindow::resizeEvent(event);
+
+    if (!m_centralStack || !m_settingsOverlay) {
+        return;
+    }
+
+    if (m_isSettingsPageTransitioning) {
+        cancelSettingsPageTransition();
+    }
+    if (m_centralStack->currentWidget() == m_settingsRoutePage) {
+        m_settingsOverlay->setGeometry(m_centralStack->geometry());
+        m_workScheduleSettingsPage->setGeometry(m_settingsOverlay->rect());
+        m_settingsOverlay->show();
+        m_settingsOverlay->raise();
+    }
 }
 
 #ifdef Q_OS_WIN
@@ -732,7 +754,9 @@ void AttendanceMainWindow::setupUI() {
         ElaIconType::CalendarDays);
     expandNavigationNode(attendanceNavigationKey);
     QString settingsPageKey;
-    addFooterNode(QStringLiteral("设置"), m_workScheduleSettingsPage, settingsPageKey, 0,
+    m_settingsRoutePage = new QWidget();
+    m_settingsRoutePage->setObjectName(QStringLiteral("workScheduleSettingsRoutePage"));
+    addFooterNode(QStringLiteral("设置"), m_settingsRoutePage, settingsPageKey, 0,
         ElaIconType::Gear);
     navigation(calendarPage->property("ElaPageKey").toString());
 
@@ -1293,6 +1317,159 @@ void AttendanceMainWindow::setupUpdateUi() {
             m_updateChecker->checkForUpdates(false);
         }
     });
+}
+
+void AttendanceMainWindow::setupSettingsPageTransition() {
+    const auto stacks = findChildren<QStackedWidget*>();
+    for (QStackedWidget* stack : stacks) {
+        if (stack->objectName() == QLatin1String("ElaCentralStackedWidget")
+            && m_settingsRoutePage
+            && stack->indexOf(m_settingsRoutePage) >= 0) {
+            m_centralStack = stack;
+            break;
+        }
+    }
+    if (!m_centralStack || !m_centralStack->parentWidget()) {
+        return;
+    }
+
+    m_currentCentralPage = m_centralStack->currentWidget();
+    QWidget* overlayParent = m_centralStack->parentWidget();
+    m_settingsOverlay = new QWidget(overlayParent);
+    m_settingsOverlay->setAttribute(Qt::WA_StyledBackground, true);
+    m_settingsOverlay->setStyleSheet(QStringLiteral("background: #f7f9fc;"));
+    m_workScheduleSettingsPage->setParent(m_settingsOverlay);
+    m_workScheduleSettingsPage->setGeometry(m_settingsOverlay->rect());
+    m_settingsOverlay->hide();
+
+    m_settingsTransitionBlocker = new QWidget(overlayParent);
+    m_settingsTransitionBlocker->setAttribute(Qt::WA_StyledBackground, true);
+    m_settingsTransitionBlocker->setStyleSheet(QStringLiteral("background: transparent;"));
+    m_settingsTransitionBlocker->hide();
+
+    m_settingsPageAnimation = new QPropertyAnimation(m_settingsOverlay, "pos", this);
+    m_settingsPageAnimation->setDuration(240);
+    m_settingsPageAnimation->setEasingCurve(QEasingCurve::OutCubic);
+    connect(m_settingsPageAnimation, &QPropertyAnimation::finished,
+        this, &AttendanceMainWindow::finishSettingsPageTransition);
+    connect(m_centralStack, &QStackedWidget::currentChanged,
+        this, &AttendanceMainWindow::onCentralPageChanged);
+}
+
+void AttendanceMainWindow::onCentralPageChanged(int index) {
+    QWidget* page = m_centralStack->widget(index);
+    QWidget* previous = m_currentCentralPage;
+    m_currentCentralPage = page;
+    if (!m_settingsRoutePage || previous == page) {
+        return;
+    }
+
+    if (m_isSettingsPageTransitioning) {
+        cancelSettingsPageTransition();
+        return;
+    }
+
+    if (page == m_settingsRoutePage) {
+        startSettingsPageTransition(true, previous);
+    }
+    else if (previous == m_settingsRoutePage) {
+        // 先让新页面完成首帧绘制，再将设置页盖回去做收起动画。
+        // 否则设置页移开时会露出上一帧的残留内容。
+        m_settingsOverlay->hide();
+        page->setGeometry(m_centralStack->contentsRect());
+        page->show();
+        page->repaint();
+        startSettingsPageTransition(false, page);
+    }
+}
+
+void AttendanceMainWindow::startSettingsPageTransition(bool entering, QWidget* backdropPage) {
+    if (!m_centralStack || !m_settingsOverlay || !m_settingsPageAnimation) {
+        return;
+    }
+
+    cancelSettingsPageTransition();
+    const QRect contentRect = m_centralStack->contentsRect();
+    const QRect overlayRect = m_centralStack->geometry();
+    m_settingsTransitionBackdrop = backdropPage;
+    m_isSettingsPageTransitioning = true;
+    m_isSettingsPageEntering = entering;
+
+    if (entering) {
+        m_settingsRoutePage->hide();
+    }
+    if (backdropPage) {
+        backdropPage->setGeometry(contentRect);
+        backdropPage->show();
+        backdropPage->lower();
+    }
+
+    m_settingsTransitionBlocker->setGeometry(overlayRect);
+    m_settingsTransitionBlocker->show();
+    m_settingsTransitionBlocker->raise();
+
+    m_settingsOverlay->setGeometry(overlayRect);
+    m_settingsOverlay->show();
+    m_settingsOverlay->raise();
+    m_workScheduleSettingsPage->setGeometry(m_settingsOverlay->rect());
+    m_workScheduleSettingsPage->show();
+
+    const QPoint shownPosition = overlayRect.topLeft();
+    const QPoint hiddenPosition(overlayRect.left(), overlayRect.bottom() + 1);
+    m_settingsOverlay->move(entering ? hiddenPosition : shownPosition);
+    const QEasingCurve easingCurve(entering ? QEasingCurve::OutCubic : QEasingCurve::InCubic);
+    m_settingsPageAnimation->setEasingCurve(easingCurve);
+    m_settingsPageAnimation->setStartValue(entering ? hiddenPosition : shownPosition);
+    m_settingsPageAnimation->setEndValue(entering ? shownPosition : hiddenPosition);
+    m_settingsPageAnimation->start();
+}
+
+void AttendanceMainWindow::cancelSettingsPageTransition() {
+    if (m_settingsPageAnimation) {
+        m_settingsPageAnimation->stop();
+    }
+    if (m_settingsTransitionBlocker) {
+        m_settingsTransitionBlocker->hide();
+    }
+    if (m_settingsTransitionBackdrop
+        && m_settingsTransitionBackdrop != m_centralStack->currentWidget()) {
+        m_settingsTransitionBackdrop->hide();
+    }
+    if (m_centralStack->currentWidget() == m_settingsRoutePage) {
+        m_settingsOverlay->setGeometry(m_centralStack->geometry());
+        m_workScheduleSettingsPage->setGeometry(m_settingsOverlay->rect());
+        m_settingsOverlay->show();
+        m_settingsOverlay->raise();
+    }
+    else {
+        m_settingsOverlay->hide();
+    }
+    m_settingsTransitionBackdrop = nullptr;
+    m_isSettingsPageTransitioning = false;
+}
+
+void AttendanceMainWindow::finishSettingsPageTransition() {
+    if (!m_isSettingsPageTransitioning) {
+        return;
+    }
+
+    m_settingsTransitionBlocker->hide();
+    if (m_isSettingsPageEntering) {
+        if (m_settingsTransitionBackdrop) {
+            m_settingsTransitionBackdrop->hide();
+        }
+        m_settingsOverlay->setGeometry(m_centralStack->geometry());
+        m_settingsOverlay->show();
+        m_settingsOverlay->raise();
+        m_workScheduleSettingsPage->setGeometry(m_settingsOverlay->rect());
+        m_workScheduleSettingsPage->show();
+    }
+    else {
+        m_settingsOverlay->hide();
+    }
+
+    m_settingsTransitionBackdrop = nullptr;
+    m_isSettingsPageTransitioning = false;
 }
 
 void AttendanceMainWindow::onCheckForUpdatesClicked() {
