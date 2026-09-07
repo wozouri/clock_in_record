@@ -371,6 +371,7 @@ void AttendanceMainWindow::moveEvent(QMoveEvent* event) {
 
 void AttendanceMainWindow::resizeEvent(QResizeEvent* event) {
     ElaWindow::resizeEvent(event);
+    scheduleStatsLabelPresentationUpdate();
 
     if (!m_centralStack || !m_settingsOverlay) {
         return;
@@ -402,7 +403,9 @@ bool AttendanceMainWindow::nativeEvent(const QByteArray& eventType, void* messag
 
 bool AttendanceMainWindow::eventFilter(QObject* watched, QEvent* event) {
     if (watched == m_statsLabel) {
-        if (event->type() == QEvent::Enter) {
+        if (event->type() == QEvent::Resize) {
+            scheduleStatsLabelPresentationUpdate();
+        } else if (event->type() == QEvent::Enter) {
             if (!m_statsContextTip) {
                 m_statsContextTip = new ElaTeachingTip(this);
                 m_statsContextTip->setTailPosition(ElaTeachingTip::Auto);
@@ -619,7 +622,12 @@ void AttendanceMainWindow::setupUI() {
         "QLabel { color: #36516f; background: #f3f7fb; border: 1px solid #d9e5f0;"
         " border-radius: 5px; padding: 0 12px; font-weight: 600; }"
         "QLabel:hover { background: #eaf3fb; border-color: #b8cfe3; }"));
-    m_statsLabel->setText(QStringLiteral("平均加班 --"));
+    m_statsLabel->setSizePolicy(QSizePolicy::Minimum, QSizePolicy::Fixed);
+    m_statsLabelFullText = QStringLiteral("平均加班 -- | 餐补 0 次");
+    m_statsLabelCompactText = QStringLiteral("-- | 0");
+    m_statsLabel->setMinimumWidth(
+        m_statsLabel->fontMetrics().horizontalAdvance(m_statsLabelCompactText) + 26);
+    m_statsLabel->setText(m_statsLabelFullText);
     m_statsLabel->installEventFilter(this);
     toolbarLayout->addWidget(m_statsLabel);
 
@@ -637,7 +645,8 @@ void AttendanceMainWindow::setupUI() {
         this, &AttendanceMainWindow::onShowCurrentMonthRequested);
     toolbarLayout->addWidget(currentMonthBtn);
 
-    toolbarLayout->addStretch();
+    m_toolbarStretch = new QSpacerItem(0, 0, QSizePolicy::Expanding, QSizePolicy::Minimum);
+    toolbarLayout->addItem(m_toolbarStretch);
 
     auto* separator = new QWidget(toolbar);
     separator->setFixedSize(1, 22);
@@ -1230,6 +1239,7 @@ void AttendanceMainWindow::updateMonthlyStatistics(const MonthlyAttendanceSnapsh
         .arg(snapshot.year)
         .arg(snapshot.month);
     stats += QString("工作天数: %1天\n").arg(snapshot.workDays);
+    stats += QString("餐补次数: %1次\n").arg(snapshot.mealAllowanceCount);
     stats += QString("总加班时间: %1小时%2分钟\n")
         .arg(snapshot.totalOvertimeMinutes / 60)
         .arg(snapshot.totalOvertimeMinutes % 60);
@@ -1247,7 +1257,47 @@ void AttendanceMainWindow::updateMonthlyStatistics(const MonthlyAttendanceSnapsh
     }
 
     m_monthlyStatsText = stats;
-    m_statsLabel->setText(QString("平均加班 %1 小时").arg(averageOvertime));
+    m_statsLabelFullText = QString("平均加班 %1 小时 | 餐补 %2 次")
+        .arg(averageOvertime)
+        .arg(snapshot.mealAllowanceCount);
+    m_statsLabelCompactText = QString("%1 | %2")
+        .arg(averageOvertime)
+        .arg(snapshot.mealAllowanceCount);
+    m_statsLabel->setMinimumWidth(
+        m_statsLabel->fontMetrics().horizontalAdvance(m_statsLabelCompactText) + 34);
+    m_statsLabel->setText(m_statsLabelFullText);
+    scheduleStatsLabelPresentationUpdate();
+}
+
+void AttendanceMainWindow::scheduleStatsLabelPresentationUpdate()
+{
+    if (m_statsLabelRefreshPending) {
+        return;
+    }
+    m_statsLabelRefreshPending = true;
+    QTimer::singleShot(0, this, [this] {
+        m_statsLabelRefreshPending = false;
+        updateStatsLabelPresentation();
+    });
+}
+
+void AttendanceMainWindow::updateStatsLabelPresentation()
+{
+    if (!m_statsLabel || m_statsLabelFullText.isEmpty()) {
+        return;
+    }
+
+    const int fullWidth = m_statsLabel->fontMetrics().horizontalAdvance(m_statsLabelFullText) + 26;
+    const bool usesCompactText = m_statsLabel->text() == m_statsLabelCompactText;
+    if (!usesCompactText && m_statsLabel->width() < fullWidth) {
+        m_statsLabel->setText(m_statsLabelCompactText);
+        return;
+    }
+
+    if (usesCompactText && m_toolbarStretch
+        && m_statsLabel->width() + m_toolbarStretch->geometry().width() >= fullWidth) {
+        m_statsLabel->setText(m_statsLabelFullText);
+    }
 }
 
 void AttendanceMainWindow::setupUpdateUi() {

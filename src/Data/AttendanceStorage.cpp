@@ -16,7 +16,7 @@ namespace {
 
 constexpr auto kTimeFormat = "hh:mm";
 constexpr auto kConnectionName = "attendance-storage";
-constexpr auto kSchemaVersion = 2;
+constexpr auto kSchemaVersion = 3;
 
 QTime readTime(const QString& value, const QTime& fallback)
 {
@@ -94,8 +94,8 @@ bool writeWorkSchedule(QSqlDatabase database, const WorkSchedule& schedule)
     query.prepare(
         "INSERT OR REPLACE INTO work_schedule "
         "(id, work_start, work_end, lunch_break_enabled, lunch_start, lunch_end, "
-        "dinner_break_enabled, dinner_start, dinner_end) "
-        "VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)");
+        "dinner_break_enabled, dinner_start, dinner_end, meal_allowance_time) "
+        "VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
     query.addBindValue(schedule.workStartTime.toString(kTimeFormat));
     query.addBindValue(schedule.workEndTime.toString(kTimeFormat));
     query.addBindValue(schedule.lunchBreakEnabled);
@@ -104,6 +104,7 @@ bool writeWorkSchedule(QSqlDatabase database, const WorkSchedule& schedule)
     query.addBindValue(schedule.dinnerBreakEnabled);
     query.addBindValue(schedule.dinnerBreakStart.toString(kTimeFormat));
     query.addBindValue(schedule.dinnerBreakEnd.toString(kTimeFormat));
+    query.addBindValue(schedule.mealAllowanceTime.toString(kTimeFormat));
     if (!query.exec()) {
         logQueryError(query, QStringLiteral("saving work schedule"));
         return false;
@@ -151,7 +152,8 @@ bool initializeSchema(QSqlDatabase database)
             "id INTEGER PRIMARY KEY CHECK(id = 1), "
             "work_start TEXT NOT NULL, work_end TEXT NOT NULL, "
             "lunch_break_enabled INTEGER NOT NULL, lunch_start TEXT NOT NULL, lunch_end TEXT NOT NULL, "
-            "dinner_break_enabled INTEGER NOT NULL, dinner_start TEXT NOT NULL, dinner_end TEXT NOT NULL)")) {
+            "dinner_break_enabled INTEGER NOT NULL, dinner_start TEXT NOT NULL, dinner_end TEXT NOT NULL, "
+            "meal_allowance_time TEXT NOT NULL DEFAULT '21:00')")) {
         logQueryError(query, QStringLiteral("creating work schedule table"));
         return false;
     }
@@ -229,6 +231,14 @@ bool migrateSchema(QSqlDatabase database, int currentVersion)
             logQueryError(query, QStringLiteral("adding record note column"));
         }
     }
+    if (success && currentVersion < 3) {
+        QSqlQuery query(database);
+        success = query.exec(
+            "ALTER TABLE work_schedule ADD COLUMN meal_allowance_time TEXT NOT NULL DEFAULT '21:00'");
+        if (!success) {
+            logQueryError(query, QStringLiteral("adding meal allowance time"));
+        }
+    }
 
     QSqlQuery versionQuery(database);
     versionQuery.prepare("UPDATE schema_info SET value = ? WHERE key = 'schema_version'");
@@ -303,7 +313,8 @@ WorkSchedule AttendanceStorage::loadWorkSchedule()
     QSqlQuery query(database);
     if (!query.exec(
             "SELECT work_start, work_end, lunch_break_enabled, lunch_start, lunch_end, "
-            "dinner_break_enabled, dinner_start, dinner_end FROM work_schedule WHERE id = 1")) {
+            "dinner_break_enabled, dinner_start, dinner_end, meal_allowance_time "
+            "FROM work_schedule WHERE id = 1")) {
         logQueryError(query, QStringLiteral("loading work schedule"));
         return schedule;
     }
@@ -319,6 +330,7 @@ WorkSchedule AttendanceStorage::loadWorkSchedule()
     schedule.dinnerBreakEnabled = query.value(5).toBool();
     schedule.dinnerBreakStart = readTime(query.value(6).toString(), schedule.dinnerBreakStart);
     schedule.dinnerBreakEnd = readTime(query.value(7).toString(), schedule.dinnerBreakEnd);
+    schedule.mealAllowanceTime = readTime(query.value(8).toString(), schedule.mealAllowanceTime);
     return schedule;
 }
 

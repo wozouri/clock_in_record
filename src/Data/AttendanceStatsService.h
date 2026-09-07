@@ -20,6 +20,7 @@ struct MonthlyAttendanceSnapshot {
     int totalOvertimeMinutes = 0;
     int totalLateMinutes = 0;
     int totalEarlyLeaveMinutes = 0;
+    int mealAllowanceCount = 0;
     QMap<QDate, AttendanceDayView> dayViews;
 };
 

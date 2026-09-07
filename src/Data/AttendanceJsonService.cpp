@@ -28,7 +28,8 @@ bool hasValidSchedule(const WorkSchedule& schedule)
 {
     return schedule.workStartTime < schedule.workEndTime
         && (!schedule.lunchBreakEnabled || schedule.lunchBreakStart < schedule.lunchBreakEnd)
-        && (!schedule.dinnerBreakEnabled || schedule.dinnerBreakStart < schedule.dinnerBreakEnd);
+        && (!schedule.dinnerBreakEnabled || schedule.dinnerBreakStart < schedule.dinnerBreakEnd)
+        && schedule.mealAllowanceTime.isValid();
 }
 
 }
@@ -81,6 +82,9 @@ AttendanceImportResult AttendanceJsonService::importFromLarkJson(const QString& 
             || hasImportedSchedule;
         hasImportedSchedule = updateTimeIfPresent(row, "dinnerEnd", importedSchedule.dinnerBreakEnd)
             || hasImportedSchedule;
+        hasImportedSchedule = updateTimeIfPresent(
+            row, "mealAllowanceTime", importedSchedule.mealAllowanceTime)
+            || hasImportedSchedule;
         if (row.value("lunchBreakEnabled").isBool()) {
             importedSchedule.lunchBreakEnabled = row.value("lunchBreakEnabled").toBool();
             hasImportedSchedule = true;
@@ -123,6 +127,7 @@ AttendanceExportResult AttendanceJsonService::exportToJson(const QString& filePa
         row["dinnerBreakEnabled"] = schedule.dinnerBreakEnabled;
         row["dinnerStart"] = schedule.dinnerBreakStart.toString("hh:mm");
         row["dinnerEnd"] = schedule.dinnerBreakEnd.toString("hh:mm");
+        row["mealAllowanceTime"] = schedule.mealAllowanceTime.toString("hh:mm");
         row["needAverageCal"] = record.needAverageCal;
         if (!record.note.isEmpty()) {
             row["note"] = record.note;

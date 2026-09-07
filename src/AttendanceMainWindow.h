@@ -22,6 +22,7 @@ class ElaTeachingTip;
 class ElaToolButton;
 class QPropertyAnimation;
 class QResizeEvent;
+class QSpacerItem;
 class QStackedWidget;
 class UpdateChecker;
 class AttendanceUpdateBar;
@@ -95,6 +96,8 @@ private:
     void deleteAttendanceRecords(const QList<QDate>& dates);
     void updateCalendarAppearance(const MonthlyAttendanceSnapshot& snapshot);
     void updateMonthlyStatistics(const MonthlyAttendanceSnapshot& snapshot);
+    void scheduleStatsLabelPresentationUpdate();
+    void updateStatsLabelPresentation();
     void copyRecord(const QDate& sourceDate);
 
     void processImportFile(const QString& filePath);
@@ -113,6 +116,7 @@ private:
     CustomCalendarWidget* m_calendar = nullptr;
     WorkScheduleSettingsPage* m_workScheduleSettingsPage = nullptr;
     QLabel* m_statsLabel = nullptr;
+    QSpacerItem* m_toolbarStretch = nullptr;
     QPushButton* m_copySelectedButton = nullptr;
     QPushButton* m_applyCopiedButton = nullptr;
     QPushButton* m_deleteSelectedButton = nullptr;
@@ -122,7 +126,10 @@ private:
     ElaTeachingTip* m_applyContextTip = nullptr;
     ElaTeachingTip* m_statsContextTip = nullptr;
     bool m_contextTipRefreshPending = false;
+    bool m_statsLabelRefreshPending = false;
     QString m_monthlyStatsText;
+    QString m_statsLabelFullText;
+    QString m_statsLabelCompactText;
     QList<QDate> m_renderedCalendarDates;
     QAction* m_undoAction = nullptr;
     QAction* m_redoAction = nullptr;

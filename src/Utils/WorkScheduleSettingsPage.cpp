@@ -7,9 +7,11 @@
 
 #include <QGridLayout>
 #include <QAbstractSpinBox>
+#include <QGraphicsDropShadowEffect>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QMessageBox>
+#include <QStyle>
 #include <QTimeEdit>
 #include <QVBoxLayout>
 
@@ -38,6 +40,9 @@ WorkScheduleSettingsPage::WorkScheduleSettingsPage(QWidget* parent)
         " border: 1px solid #cfdbe7; border-radius: 5px; padding: 0 9px; }"
         "QTimeEdit:hover { border-color: #9ebdd8; }"
         "QTimeEdit:focus { border: 1px solid #5b9bd5; }"
+        "QTimeEdit[hasPendingChange=\"true\"] { color: #734500; background: #fff8e8;"
+        " border: 1px solid #e6ad55; }"
+        "QTimeEdit[hasPendingChange=\"true\"]:focus { border-color: #d78b20; }"
         "QTimeEdit:disabled { color: #9aa8b5; background: #f3f5f7; border-color: #e0e6ec; }"));
 
     auto* mainLayout = new QVBoxLayout(this);
@@ -49,16 +54,21 @@ WorkScheduleSettingsPage::WorkScheduleSettingsPage(QWidget* parent)
     auto* title = new ElaText(QStringLiteral("工作制度"), 23, this);
     title->setStyleSheet(QStringLiteral("color: #12213d; font-weight: 600;"));
     headerLayout->addWidget(title);
+    m_pendingChangesLabel = new QLabel(QStringLiteral("未保存修改"), this);
+    m_pendingChangesLabel->setStyleSheet(
+        QStringLiteral("color: #a66308; font-weight: 600; padding-left: 6px;"));
+    m_pendingChangesLabel->hide();
+    headerLayout->addWidget(m_pendingChangesLabel);
     headerLayout->addStretch();
 
-    auto* saveButton = new ElaPushButton(QStringLiteral("保存设置"), this);
-    saveButton->setMinimumSize(112, 34);
-    saveButton->setCursor(Qt::PointingHandCursor);
-    saveButton->setLightDefaultColor(QColor(QStringLiteral("#1769aa")));
-    saveButton->setLightHoverColor(QColor(QStringLiteral("#0f5c9b")));
-    saveButton->setLightTextColor(Qt::white);
-    connect(saveButton, &ElaPushButton::clicked, this, &WorkScheduleSettingsPage::saveWorkSchedule);
-    headerLayout->addWidget(saveButton);
+    m_saveButton = new ElaPushButton(QStringLiteral("保存设置"), this);
+    m_saveButton->setMinimumSize(112, 34);
+    m_saveButton->setCursor(Qt::PointingHandCursor);
+    m_saveButton->setLightDefaultColor(QColor(QStringLiteral("#1769aa")));
+    m_saveButton->setLightHoverColor(QColor(QStringLiteral("#0f5c9b")));
+    m_saveButton->setLightTextColor(Qt::white);
+    connect(m_saveButton, &ElaPushButton::clicked, this, &WorkScheduleSettingsPage::saveWorkSchedule);
+    headerLayout->addWidget(m_saveButton);
     mainLayout->addLayout(headerLayout);
 
     auto* settingsPanel = new QWidget(this);
@@ -118,17 +128,53 @@ WorkScheduleSettingsPage::WorkScheduleSettingsPage(QWidget* parent)
     breakLayout->setColumnStretch(5, 1);
     panelLayout->addWidget(breakGroup);
 
+    auto* mealAllowanceGroup = new ElaGroupBox(QStringLiteral("餐补统计"), settingsPanel);
+    mealAllowanceGroup->setStyleSheet(workGroup->styleSheet());
+    auto* mealAllowanceLayout = new QGridLayout(mealAllowanceGroup);
+    mealAllowanceLayout->setContentsMargins(20, 24, 20, 18);
+    mealAllowanceLayout->setHorizontalSpacing(12);
+    m_mealAllowanceTimeEdit = createTimeEdit();
+    mealAllowanceLayout->addWidget(createFieldLabel(QStringLiteral("餐补起算"), mealAllowanceGroup), 0, 0);
+    mealAllowanceLayout->addWidget(m_mealAllowanceTimeEdit, 0, 1);
+    mealAllowanceLayout->setColumnStretch(1, 1);
+    panelLayout->addWidget(mealAllowanceGroup);
+
     mainLayout->addWidget(settingsPanel);
     mainLayout->addStretch();
+
+    m_lunchBreakChangeEffect = new QGraphicsDropShadowEffect(m_lunchBreakEnabledCheckBox);
+    m_lunchBreakChangeEffect->setBlurRadius(10);
+    m_lunchBreakChangeEffect->setOffset(0, 0);
+    m_lunchBreakChangeEffect->setColor(QColor(QStringLiteral("#e6ad55")));
+    m_lunchBreakChangeEffect->setEnabled(false);
+    m_lunchBreakEnabledCheckBox->setGraphicsEffect(m_lunchBreakChangeEffect);
+
+    m_dinnerBreakChangeEffect = new QGraphicsDropShadowEffect(m_dinnerBreakEnabledCheckBox);
+    m_dinnerBreakChangeEffect->setBlurRadius(10);
+    m_dinnerBreakChangeEffect->setOffset(0, 0);
+    m_dinnerBreakChangeEffect->setColor(QColor(QStringLiteral("#e6ad55")));
+    m_dinnerBreakChangeEffect->setEnabled(false);
+    m_dinnerBreakEnabledCheckBox->setGraphicsEffect(m_dinnerBreakChangeEffect);
 
     connect(m_lunchBreakEnabledCheckBox, &ElaToggleSwitch::toggled,
         this, &WorkScheduleSettingsPage::updateLunchBreakState);
     connect(m_dinnerBreakEnabledCheckBox, &ElaToggleSwitch::toggled,
         this, &WorkScheduleSettingsPage::updateDinnerBreakState);
+    const auto updateChanges = [this] { updateChangeState(); };
+    connect(m_workStartTimeEdit, &QTimeEdit::timeChanged, this, updateChanges);
+    connect(m_workEndTimeEdit, &QTimeEdit::timeChanged, this, updateChanges);
+    connect(m_lunchBreakStartEdit, &QTimeEdit::timeChanged, this, updateChanges);
+    connect(m_lunchBreakEndEdit, &QTimeEdit::timeChanged, this, updateChanges);
+    connect(m_dinnerBreakStartEdit, &QTimeEdit::timeChanged, this, updateChanges);
+    connect(m_dinnerBreakEndEdit, &QTimeEdit::timeChanged, this, updateChanges);
+    connect(m_mealAllowanceTimeEdit, &QTimeEdit::timeChanged, this, updateChanges);
+    connect(m_lunchBreakEnabledCheckBox, &ElaToggleSwitch::toggled, this, updateChanges);
+    connect(m_dinnerBreakEnabledCheckBox, &ElaToggleSwitch::toggled, this, updateChanges);
 }
 
 void WorkScheduleSettingsPage::setWorkSchedule(const WorkSchedule& schedule)
 {
+    m_savedSchedule = schedule;
     m_workStartTimeEdit->setTime(schedule.workStartTime);
     m_workEndTimeEdit->setTime(schedule.workEndTime);
     m_lunchBreakEnabledCheckBox->setIsToggled(schedule.lunchBreakEnabled);
@@ -137,8 +183,10 @@ void WorkScheduleSettingsPage::setWorkSchedule(const WorkSchedule& schedule)
     m_dinnerBreakEnabledCheckBox->setIsToggled(schedule.dinnerBreakEnabled);
     m_dinnerBreakStartEdit->setTime(schedule.dinnerBreakStart);
     m_dinnerBreakEndEdit->setTime(schedule.dinnerBreakEnd);
+    m_mealAllowanceTimeEdit->setTime(schedule.mealAllowanceTime);
     updateLunchBreakState(schedule.lunchBreakEnabled);
     updateDinnerBreakState(schedule.dinnerBreakEnabled);
+    updateChangeState();
 }
 
 void WorkScheduleSettingsPage::updateLunchBreakState(bool enabled)
@@ -165,6 +213,14 @@ void WorkScheduleSettingsPage::saveWorkSchedule()
         return;
     }
 
+    const WorkSchedule schedule = currentWorkSchedule();
+    emit workScheduleSaved(schedule);
+    m_savedSchedule = schedule;
+    updateChangeState();
+}
+
+WorkSchedule WorkScheduleSettingsPage::currentWorkSchedule() const
+{
     WorkSchedule schedule;
     schedule.workStartTime = m_workStartTimeEdit->time();
     schedule.workEndTime = m_workEndTimeEdit->time();
@@ -174,7 +230,59 @@ void WorkScheduleSettingsPage::saveWorkSchedule()
     schedule.dinnerBreakEnabled = m_dinnerBreakEnabledCheckBox->getIsToggled();
     schedule.dinnerBreakStart = m_dinnerBreakStartEdit->time();
     schedule.dinnerBreakEnd = m_dinnerBreakEndEdit->time();
-    emit workScheduleSaved(schedule);
+    schedule.mealAllowanceTime = m_mealAllowanceTimeEdit->time();
+    return schedule;
+}
+
+void WorkScheduleSettingsPage::updateChangeState()
+{
+    const WorkSchedule current = currentWorkSchedule();
+    const bool hasChanges = current.workStartTime != m_savedSchedule.workStartTime
+        || current.workEndTime != m_savedSchedule.workEndTime
+        || current.lunchBreakEnabled != m_savedSchedule.lunchBreakEnabled
+        || current.lunchBreakStart != m_savedSchedule.lunchBreakStart
+        || current.lunchBreakEnd != m_savedSchedule.lunchBreakEnd
+        || current.dinnerBreakEnabled != m_savedSchedule.dinnerBreakEnabled
+        || current.dinnerBreakStart != m_savedSchedule.dinnerBreakStart
+        || current.dinnerBreakEnd != m_savedSchedule.dinnerBreakEnd
+        || current.mealAllowanceTime != m_savedSchedule.mealAllowanceTime;
+    m_pendingChangesLabel->setVisible(hasChanges);
+    m_saveButton->setEnabled(hasChanges);
+
+    updateTimeEditChangeState(m_workStartTimeEdit, m_savedSchedule.workStartTime);
+    updateTimeEditChangeState(m_workEndTimeEdit, m_savedSchedule.workEndTime);
+    updateTimeEditChangeState(m_lunchBreakStartEdit, m_savedSchedule.lunchBreakStart);
+    updateTimeEditChangeState(m_lunchBreakEndEdit, m_savedSchedule.lunchBreakEnd);
+    updateTimeEditChangeState(m_dinnerBreakStartEdit, m_savedSchedule.dinnerBreakStart);
+    updateTimeEditChangeState(m_dinnerBreakEndEdit, m_savedSchedule.dinnerBreakEnd);
+    updateTimeEditChangeState(m_mealAllowanceTimeEdit, m_savedSchedule.mealAllowanceTime);
+    updateToggleChangeState(m_lunchBreakEnabledCheckBox, m_lunchBreakChangeEffect,
+        current.lunchBreakEnabled != m_savedSchedule.lunchBreakEnabled,
+        m_savedSchedule.lunchBreakEnabled, QStringLiteral("午休"));
+    updateToggleChangeState(m_dinnerBreakEnabledCheckBox, m_dinnerBreakChangeEffect,
+        current.dinnerBreakEnabled != m_savedSchedule.dinnerBreakEnabled,
+        m_savedSchedule.dinnerBreakEnabled, QStringLiteral("晚餐休息"));
+}
+
+void WorkScheduleSettingsPage::updateTimeEditChangeState(QTimeEdit* editor, const QTime& originalTime)
+{
+    const bool changed = editor->time() != originalTime;
+    editor->setProperty("hasPendingChange", changed);
+    editor->setToolTip(changed
+            ? QStringLiteral("原设置：%1").arg(originalTime.toString(QStringLiteral("HH:mm")))
+            : QString());
+    editor->style()->unpolish(editor);
+    editor->style()->polish(editor);
+}
+
+void WorkScheduleSettingsPage::updateToggleChangeState(ElaToggleSwitch* toggle,
+    QGraphicsDropShadowEffect* effect, bool changed, bool originalEnabled, const QString& label)
+{
+    effect->setEnabled(changed);
+    toggle->setToolTip(changed
+            ? QStringLiteral("%1已修改，原设置：%2").arg(label,
+                  originalEnabled ? QStringLiteral("启用") : QStringLiteral("关闭"))
+            : label);
 }
 
 QTimeEdit* WorkScheduleSettingsPage::createTimeEdit()

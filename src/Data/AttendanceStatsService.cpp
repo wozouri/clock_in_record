@@ -33,6 +33,9 @@ MonthlyAttendanceSnapshot AttendanceStatsService::buildMonthlySnapshot(int year,
             if (result.overtimeMinutes > 0) {
                 snapshot.totalOvertimeMinutes += result.overtimeMinutes;
             }
+            if (record.departureTime >= schedule.mealAllowanceTime) {
+                snapshot.mealAllowanceCount++;
+            }
             snapshot.totalLateMinutes += result.lateMinutes;
             snapshot.totalEarlyLeaveMinutes += result.earlyLeaveMinutes;
         }
