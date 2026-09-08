@@ -7,6 +7,7 @@ MonthlyAttendanceSnapshot AttendanceStatsService::buildMonthlySnapshot(int year,
     snapshot.year = year;
     snapshot.month = month;
     const WorkSchedule schedule = AttendanceStorage::loadWorkSchedule();
+    snapshot.showMealAllowanceMarker = schedule.showMealAllowanceMarker;
 
     const QDate startDate(year, month, 1);
     const QDate endDate = startDate.addMonths(1).addDays(-1);
@@ -24,6 +25,8 @@ MonthlyAttendanceSnapshot AttendanceStatsService::buildMonthlySnapshot(int year,
             dayView.arrivalText = record.arrivalTime.toString("hh:mm");
             dayView.departureText = record.departureTime.toString("hh:mm");
             dayView.hasNote = !record.note.trimmed().isEmpty();
+            dayView.note = record.note.trimmed();
+            dayView.hasMealAllowance = record.departureTime >= schedule.mealAllowanceTime;
 
             snapshot.workDays++;
             if (!record.needAverageCal) {
@@ -33,7 +36,7 @@ MonthlyAttendanceSnapshot AttendanceStatsService::buildMonthlySnapshot(int year,
             if (result.overtimeMinutes > 0) {
                 snapshot.totalOvertimeMinutes += result.overtimeMinutes;
             }
-            if (record.departureTime >= schedule.mealAllowanceTime) {
+            if (dayView.hasMealAllowance) {
                 snapshot.mealAllowanceCount++;
             }
             snapshot.totalLateMinutes += result.lateMinutes;

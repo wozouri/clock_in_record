@@ -24,7 +24,14 @@ namespace {
 
 constexpr int kCheckRequestTimeoutMs = 8000;
 constexpr int kDownloadInactivityTimeoutMs = 60000;
-constexpr char kDefaultServiceBaseUrl[] = "http://127.0.0.1:47980";
+constexpr char kDefaultServiceHost[] = "192.168.3.35";
+constexpr quint16 kDefaultServicePort = 47980;
+
+QString updateServiceConfigPath()
+{
+    return QDir(QStandardPaths::writableLocation(QStandardPaths::AppDataLocation))
+        .filePath(QStringLiteral("updateservice.ini"));
+}
 
 bool isValidSha256Digest(const QString& digest)
 {
@@ -100,16 +107,49 @@ QUrl UpdateChecker::serviceBaseUrl() const
 
 QString UpdateChecker::updateServiceBaseUrl()
 {
-    const QString configPath =
-        QDir(QStandardPaths::writableLocation(QStandardPaths::AppDataLocation))
-            .filePath(QStringLiteral("updateservice.ini"));
-    QSettings settings(configPath, QSettings::IniFormat);
-    const QString configured =
-        settings.value(QStringLiteral("update/baseUrl")).toString().trimmed();
+    return QStringLiteral("http://%1:%2")
+        .arg(updateServiceHost())
+        .arg(updateServicePort());
+}
+
+QString UpdateChecker::updateServiceHost()
+{
+    QSettings settings(updateServiceConfigPath(), QSettings::IniFormat);
+    const QString configured = settings.value(QStringLiteral("update/host")).toString().trimmed();
     if (!configured.isEmpty()) {
         return configured;
     }
-    return QString::fromLatin1(kDefaultServiceBaseUrl);
+
+    const QUrl legacyUrl(settings.value(QStringLiteral("update/baseUrl")).toString().trimmed());
+    if (legacyUrl.isValid() && !legacyUrl.host().isEmpty()) {
+        return legacyUrl.host();
+    }
+    return QString::fromLatin1(kDefaultServiceHost);
+}
+
+quint16 UpdateChecker::updateServicePort()
+{
+    QSettings settings(updateServiceConfigPath(), QSettings::IniFormat);
+    bool valid = false;
+    const uint configured = settings.value(QStringLiteral("update/port")).toUInt(&valid);
+    if (valid && configured > 0 && configured <= 65535) {
+        return static_cast<quint16>(configured);
+    }
+
+    const QUrl legacyUrl(settings.value(QStringLiteral("update/baseUrl")).toString().trimmed());
+    if (legacyUrl.isValid() && legacyUrl.port() > 0) {
+        return static_cast<quint16>(legacyUrl.port());
+    }
+    return kDefaultServicePort;
+}
+
+void UpdateChecker::saveUpdateServiceEndpoint(const QString& host, quint16 port)
+{
+    QSettings settings(updateServiceConfigPath(), QSettings::IniFormat);
+    settings.setValue(QStringLiteral("update/host"), host.trimmed());
+    settings.setValue(QStringLiteral("update/port"), port);
+    settings.remove(QStringLiteral("update/baseUrl"));
+    settings.sync();
 }
 
 QString UpdateChecker::takePendingUpdateVersion()

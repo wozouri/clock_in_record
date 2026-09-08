@@ -93,6 +93,11 @@ AttendanceImportResult AttendanceJsonService::importFromLarkJson(const QString& 
             importedSchedule.dinnerBreakEnabled = row.value("dinnerBreakEnabled").toBool();
             hasImportedSchedule = true;
         }
+        if (row.value("showMealAllowanceMarker").isBool()) {
+            importedSchedule.showMealAllowanceMarker =
+                row.value("showMealAllowanceMarker").toBool();
+            hasImportedSchedule = true;
+        }
         importedCount++;
     }
 
@@ -128,6 +133,7 @@ AttendanceExportResult AttendanceJsonService::exportToJson(const QString& filePa
         row["dinnerStart"] = schedule.dinnerBreakStart.toString("hh:mm");
         row["dinnerEnd"] = schedule.dinnerBreakEnd.toString("hh:mm");
         row["mealAllowanceTime"] = schedule.mealAllowanceTime.toString("hh:mm");
+        row["showMealAllowanceMarker"] = schedule.showMealAllowanceMarker;
         row["needAverageCal"] = record.needAverageCal;
         if (!record.note.isEmpty()) {
             row["note"] = record.note;

@@ -40,6 +40,9 @@ public:
     // 读取并清除"待更新版本"标记，用于重启后提示更新完成。
     static QString takePendingUpdateVersion();
     static QString updateServiceBaseUrl();
+    static QString updateServiceHost();
+    static quint16 updateServicePort();
+    static void saveUpdateServiceEndpoint(const QString& host, quint16 port);
 
     bool isDownloadInProgress() const;
 

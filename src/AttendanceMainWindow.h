@@ -109,6 +109,7 @@ private:
     void startSettingsPageTransition(bool entering, QWidget* backdropPage);
     void cancelSettingsPageTransition();
     void finishSettingsPageTransition();
+    void showAboutDialog();
     void showUpdateConfirmDialog();
     void startUpdateDownload();
     void closeUpdateProgressDialog();
@@ -125,6 +126,7 @@ private:
     ElaTeachingTip* m_copyContextTip = nullptr;
     ElaTeachingTip* m_applyContextTip = nullptr;
     ElaTeachingTip* m_statsContextTip = nullptr;
+    bool m_isCalendarPointerInside = false;
     bool m_contextTipRefreshPending = false;
     bool m_statsLabelRefreshPending = false;
     QString m_monthlyStatsText;

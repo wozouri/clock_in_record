@@ -13,6 +13,7 @@ struct WorkSchedule {
     QTime dinnerBreakStart = QTime(18, 0);
     QTime dinnerBreakEnd = QTime(18, 30);
     QTime mealAllowanceTime = QTime(21, 0);
+    bool showMealAllowanceMarker = false;
 };
 
 struct AttendanceRecord {

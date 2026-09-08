@@ -2,6 +2,12 @@
 file(GLOB_RECURSE APP_SOURCES CONFIGURE_DEPENDS "*.cpp")
 file(GLOB_RECURSE APP_HEADERS CONFIGURE_DEPENDS "*.h")
 
+configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/AppVersion.h.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/generated/AppVersion.h"
+    @ONLY
+)
+
 # 资源文件配置
 set(RESOURCE_DIR "${CMAKE_SOURCE_DIR}/resources")
 set(APP_RESOURCES "${RESOURCE_DIR}/resources.qrc")
@@ -43,6 +49,7 @@ set_target_properties(${PROJECT_NAME} PROPERTIES
 # 设置包含目录
 target_include_directories(${PROJECT_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}          # src目录
+    ${CMAKE_CURRENT_BINARY_DIR}/generated # CMake 生成的版本信息
     ${CMAKE_CURRENT_SOURCE_DIR}/Types    # Types目录
     ${CMAKE_CURRENT_SOURCE_DIR}/Utils    # Utils目录
     ${CMAKE_CURRENT_SOURCE_DIR}/Cal      # Cal目录

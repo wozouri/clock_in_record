@@ -1,0 +1,3 @@
+#pragma once
+
+#define ATTENDANCE_APP_VERSION "v@PROJECT_VERSION@"

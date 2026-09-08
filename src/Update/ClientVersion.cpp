@@ -1,24 +1,30 @@
 #include "ClientVersion.h"
 
+#include <QDate>
 #include <QStringList>
-
-#include <algorithm>
-#include <limits>
 
 namespace {
 
-bool parseClientVersion(const QString& version, QList<quint32>& parts)
+bool parseClientVersion(const QString& version, QList<quint32>& parts, bool requirePrefix)
 {
-    const QString normalized = version.trimmed();
+    QString normalized = version.trimmed();
+    const bool hasPrefix = normalized.startsWith(QLatin1Char('v'));
+    if (requirePrefix != hasPrefix) {
+        return false;
+    }
+    if (hasPrefix) {
+        normalized.remove(0, 1);
+    }
     const QStringList rawParts = normalized.split(QLatin1Char('.'), Qt::KeepEmptyParts);
-    if (rawParts.size() < 3) {
+    if (rawParts.size() != 3 || rawParts.at(0).size() != 4 || rawParts.at(1).size() != 2
+        || rawParts.at(2).size() != 2) {
         return false;
     }
 
     parts.clear();
     parts.reserve(rawParts.size());
     for (const QString& rawPart : rawParts) {
-        if (rawPart.isEmpty() || rawPart.size() > 10) {
+        if (rawPart.isEmpty()) {
             return false;
         }
         for (const QChar character : rawPart) {
@@ -27,13 +33,13 @@ bool parseClientVersion(const QString& version, QList<quint32>& parts)
             }
         }
         bool ok = false;
-        const qulonglong value = rawPart.toULongLong(&ok, 10);
-        if (!ok || value > std::numeric_limits<quint32>::max()) {
+        const uint value = rawPart.toUInt(&ok, 10);
+        if (!ok) {
             return false;
         }
-        parts.push_back(static_cast<quint32>(value));
+        parts.push_back(value);
     }
-    return true;
+    return QDate(parts.at(0), static_cast<int>(parts.at(1)), static_cast<int>(parts.at(2))).isValid();
 }
 
 }  // namespace
@@ -43,21 +49,23 @@ namespace attendance {
 bool isValidClientVersion(const QString& version)
 {
     QList<quint32> parts;
-    return parseClientVersion(version, parts);
+    return parseClientVersion(version, parts, true);
 }
 
 int compareClientVersions(const QString& left, const QString& right)
 {
     QList<quint32> leftParts;
     QList<quint32> rightParts;
-    if (!parseClientVersion(left, leftParts) || !parseClientVersion(right, rightParts)) {
+    if (!parseClientVersion(left, leftParts, false) && !parseClientVersion(left, leftParts, true)) {
+        return 0;
+    }
+    if (!parseClientVersion(right, rightParts, false) && !parseClientVersion(right, rightParts, true)) {
         return 0;
     }
 
-    const int count = std::max(leftParts.size(), rightParts.size());
-    for (int index = 0; index < count; ++index) {
-        const quint32 leftPart = index < leftParts.size() ? leftParts.at(index) : 0;
-        const quint32 rightPart = index < rightParts.size() ? rightParts.at(index) : 0;
+    for (int index = 0; index < leftParts.size(); ++index) {
+        const quint32 leftPart = leftParts.at(index);
+        const quint32 rightPart = rightParts.at(index);
         if (leftPart < rightPart) {
             return -1;
         }

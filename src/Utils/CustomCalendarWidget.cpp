@@ -10,10 +10,19 @@
 #include <QContextMenuEvent>
 #include <QCursor>
 #include <QEventLoop>
+#include <QFontMetrics>
+#include <QLabel>
 #include <QMouseEvent>
 #include <QPainter>
+#include <QPointer>
+#include <QScreen>
+#include <QTimer>
+#include <QTextDocument>
+#include <QtMath>
 #include <QWheelEvent>
+#include <QWindow>
 #include <algorithm>
+#include <cmath>
 
 namespace {
 constexpr int kMonthHeaderHeight = 54;
@@ -67,11 +76,175 @@ QColor softenedRecordColor(const QColor& color)
 }
 }
 
+class CalendarNoteTip final : public QWidget
+{
+public:
+    explicit CalendarNoteTip(QWidget* parent)
+        : QWidget(parent, Qt::Tool | Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint
+                            | Qt::WindowDoesNotAcceptFocus)
+        , m_content(new QLabel(this))
+    {
+        setObjectName(QStringLiteral("calendarNoteTip"));
+        setAttribute(Qt::WA_TranslucentBackground);
+        setAttribute(Qt::WA_ShowWithoutActivating);
+        setAttribute(Qt::WA_TransparentForMouseEvents);
+        setStyleSheet(QStringLiteral("QWidget#calendarNoteTip { border: none; background: transparent; }"));
+        m_content->setTextFormat(Qt::PlainText);
+        m_content->setWordWrap(true);
+        m_content->setStyleSheet(QStringLiteral("color: #31465d; font-size: 12px;"));
+        m_glowTimer.setInterval(42);
+        connect(&m_glowTimer, &QTimer::timeout, this, [this] {
+            m_glowPhase = (m_glowPhase + 1) % 96;
+            update();
+        });
+    }
+
+    void showForCell(QWidget* anchor, const QRect& cell, const QString& note)
+    {
+        m_anchor = anchor;
+        m_cell = cell;
+        m_note = note;
+        trackWindow(anchor ? anchor->window() : nullptr);
+        updateGeometryForContent();
+        reposition();
+        show();
+        raise();
+        if (!m_glowTimer.isActive()) {
+            m_glowTimer.start();
+        }
+    }
+
+    void hideTip()
+    {
+        hide();
+        m_glowTimer.stop();
+        m_glowPhase = 0;
+    }
+
+protected:
+    void paintEvent(QPaintEvent* event) override
+    {
+        Q_UNUSED(event)
+        QPainter painter(this);
+        painter.setRenderHint(QPainter::Antialiasing);
+        painter.setCompositionMode(QPainter::CompositionMode_Source);
+        painter.fillRect(rect(), Qt::transparent);
+        painter.setCompositionMode(QPainter::CompositionMode_SourceOver);
+        constexpr double kTwoPi = 6.283185307179586;
+        const double phase = static_cast<double>(m_glowPhase) * kTwoPi / 96.0;
+        const int glowAlpha = 34 + qRound((std::sin(phase) + 1.0) * 18.0);
+        painter.setPen(QPen(QColor(55, 131, 190, glowAlpha), 2));
+        painter.setBrush(Qt::NoBrush);
+        painter.drawRoundedRect(rect().adjusted(1, 1, -2, -2), 7, 7);
+        painter.setPen(QPen(QColor(QStringLiteral("#b9cad9"))));
+        painter.setBrush(QColor(QStringLiteral("#ffffff")));
+        painter.drawRoundedRect(rect().adjusted(1, 1, -2, -2), 6, 6);
+    }
+
+    bool eventFilter(QObject* watched, QEvent* event) override
+    {
+        if (watched == m_trackedWindow && isVisible()
+            && (event->type() == QEvent::Move || event->type() == QEvent::Resize
+                || event->type() == QEvent::WindowStateChange)) {
+            reposition();
+        }
+        return QWidget::eventFilter(watched, event);
+    }
+
+private:
+    QScreen* currentScreen() const
+    {
+        if (!m_anchor) {
+            return nullptr;
+        }
+        if (QScreen* screen = QApplication::screenAt(m_anchor->mapToGlobal(m_cell.center()))) {
+            return screen;
+        }
+        return m_anchor->windowHandle() ? m_anchor->windowHandle()->screen() : nullptr;
+    }
+
+    void trackWindow(QWidget* window)
+    {
+        if (m_trackedWindow == window) {
+            return;
+        }
+        if (m_trackedWindow) {
+            m_trackedWindow->removeEventFilter(this);
+        }
+        m_trackedWindow = window;
+        if (m_trackedWindow) {
+            m_trackedWindow->installEventFilter(this);
+        }
+    }
+
+    void updateGeometryForContent()
+    {
+        const QRect available = currentScreen() ? currentScreen()->availableGeometry() : QRect(0, 0, 800, 600);
+        const int horizontalMargin = 14;
+        const int verticalMargin = 10;
+        const int maxTextWidth = qMax(160, qMin(400, available.width() - 48));
+        const int minimumTextWidth = qMin(180, maxTextWidth);
+        QFontMetrics metrics(m_content->font());
+        int naturalTextWidth = 0;
+        for (const QString& line : m_note.split(QLatin1Char('\n'))) {
+            naturalTextWidth = qMax(naturalTextWidth, metrics.horizontalAdvance(line));
+        }
+        const int textWidth = qBound(minimumTextWidth, naturalTextWidth + 2, maxTextWidth);
+        m_content->setText(m_note);
+        // setFixedHeight() constrains QLabel's subsequent heightForWidth() calls.
+        // Reset it before measuring a shorter replacement note.
+        m_content->setMinimumHeight(0);
+        m_content->setMaximumHeight(QWIDGETSIZE_MAX);
+        m_content->setFixedWidth(textWidth);
+
+        QTextDocument textDocument;
+        textDocument.setDocumentMargin(0);
+        textDocument.setDefaultFont(m_content->font());
+        textDocument.setPlainText(m_note);
+        textDocument.setTextWidth(textWidth);
+        const int maxTextHeight = qMax(metrics.lineSpacing(), available.height() - 48);
+        const int textHeight = qMin(maxTextHeight,
+            qMax(metrics.lineSpacing(), qCeil(textDocument.size().height())));
+        m_content->setFixedHeight(textHeight);
+        resize(textWidth + horizontalMargin * 2, textHeight + verticalMargin * 2);
+        m_content->setGeometry(horizontalMargin, verticalMargin, textWidth, textHeight);
+    }
+
+    void reposition()
+    {
+        QScreen* screen = currentScreen();
+        if (!screen || !m_anchor) {
+            return;
+        }
+        const QRect available = screen->availableGeometry();
+        const QRect cellGlobal(m_anchor->mapToGlobal(m_cell.topLeft()), m_cell.size());
+        constexpr int kGap = 8;
+        QPoint position(cellGlobal.center().x() - width() / 2, cellGlobal.top() - height() - kGap);
+        if (position.y() < available.top() + kGap) {
+            position.setY(cellGlobal.bottom() + kGap);
+        }
+        position.setX(qBound(available.left() + kGap, position.x(),
+            available.right() - width() - kGap));
+        position.setY(qBound(available.top() + kGap, position.y(),
+            available.bottom() - height() - kGap));
+        move(position);
+    }
+
+    QLabel* m_content = nullptr;
+    QPointer<QWidget> m_anchor;
+    QPointer<QWidget> m_trackedWindow;
+    QRect m_cell;
+    QString m_note;
+    QTimer m_glowTimer;
+    int m_glowPhase = 0;
+};
+
 CustomCalendarWidget::CustomCalendarWidget(QWidget* parent)
     : QWidget(parent)
     , m_pageDate(QDate(QDate::currentDate().year(), QDate::currentDate().month(), 1))
 {
     setMouseTracking(true);
+    m_noteTip = new CalendarNoteTip(this);
     setMinimumHeight(440);
     setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     setAttribute(Qt::WA_OpaquePaintEvent);
@@ -125,6 +298,7 @@ void CustomCalendarWidget::setCurrentPage(int year, int month)
     m_yearOverviewVisible = false;
     m_pageDate = requestedPage;
     m_hoveredDate = QDate();
+    m_noteTip->hideTip();
     update();
     if (leavingYearOverview) {
         emit yearOverviewVisibilityChanged(false);
@@ -140,6 +314,7 @@ void CustomCalendarWidget::setYearOverviewVisible(bool visible)
 
     m_yearOverviewVisible = visible;
     m_hoveredDate = QDate();
+    m_noteTip->hideTip();
     if (visible) {
         refreshYearRecordDates();
     }
@@ -164,12 +339,18 @@ void CustomCalendarWidget::setDateTextFormat(const QDate& date, const QTextCharF
 void CustomCalendarWidget::setCustomData(const QDate& date, const QVariantMap& value)
 {
     m_data.insert(date, value);
+    if (date == m_hoveredDate) {
+        refreshHoveredNoteTip();
+    }
     update();
 }
 
 void CustomCalendarWidget::clearCustomData(const QDate& date)
 {
     if (m_data.remove(date) > 0) {
+        if (date == m_hoveredDate) {
+            refreshHoveredNoteTip();
+        }
         update();
     }
 }
@@ -402,6 +583,21 @@ void CustomCalendarWidget::paintEvent(QPaintEvent* event)
                 painter.drawEllipse(QPoint(cardRect.right() - 9, cardRect.top() + 10), 3, 3);
                 painter.restore();
             }
+
+            if (dayData.value(QStringLiteral("hasMealAllowance")).toBool()) {
+                painter.save();
+                const QRect mealAllowanceRect(cardRect.left() + 7, cardRect.bottom() - 19, 18, 14);
+                painter.setPen(Qt::NoPen);
+                painter.setBrush(QColor(QStringLiteral("#e07a28")));
+                painter.drawRoundedRect(mealAllowanceRect, 3, 3);
+                QFont mealAllowanceFont = painter.font();
+                mealAllowanceFont.setPointSize(7);
+                mealAllowanceFont.setBold(true);
+                painter.setFont(mealAllowanceFont);
+                painter.setPen(Qt::white);
+                painter.drawText(mealAllowanceRect, Qt::AlignCenter, QStringLiteral("餐"));
+                painter.restore();
+            }
         }
     }
 
@@ -556,8 +752,16 @@ void CustomCalendarWidget::contextMenuEvent(QContextMenuEvent* event)
     event->accept();
 }
 
+void CustomCalendarWidget::enterEvent(QEvent* event)
+{
+    QWidget::enterEvent(event);
+    emit pointerInsideChanged(true);
+}
+
 void CustomCalendarWidget::leaveEvent(QEvent* event)
 {
+    emit pointerInsideChanged(false);
+    m_noteTip->hideTip();
     if (m_hoveredDate.isValid() || m_hoveredHeaderControl != 0) {
         m_hoveredDate = QDate();
         m_hoveredHeaderControl = 0;
@@ -876,6 +1080,7 @@ void CustomCalendarWidget::updateHoveredDate(const QPoint& position)
         m_hoveredHeaderControl = headerControl;
         m_hoveredDate = QDate();
         setCursor(Qt::PointingHandCursor);
+        m_noteTip->hideTip();
         if (changed) {
             update();
         }
@@ -895,6 +1100,7 @@ void CustomCalendarWidget::updateHoveredDate(const QPoint& position)
             }
         }
         setCursor(overMonth ? Qt::PointingHandCursor : Qt::ArrowCursor);
+        m_noteTip->hideTip();
         return;
     }
 
@@ -904,5 +1110,23 @@ void CustomCalendarWidget::updateHoveredDate(const QPoint& position)
     }
     m_hoveredDate = hoveredDate;
     setCursor(hoveredDate.isValid() ? Qt::PointingHandCursor : Qt::ArrowCursor);
+    refreshHoveredNoteTip();
     update();
+}
+
+void CustomCalendarWidget::refreshHoveredNoteTip()
+{
+    if (m_yearOverviewVisible || !m_hoveredDate.isValid()) {
+        m_noteTip->hideTip();
+        return;
+    }
+
+    const QString note = m_data.value(m_hoveredDate).value(QStringLiteral("note")).toString().trimmed();
+    const int dayOffset = firstVisibleDate().daysTo(m_hoveredDate);
+    if (note.isEmpty() || dayOffset < 0 || dayOffset >= kGridRows * kGridColumns) {
+        m_noteTip->hideTip();
+        return;
+    }
+
+    m_noteTip->showForCell(this, cellRect(dayOffset / kGridColumns, dayOffset % kGridColumns), note);
 }

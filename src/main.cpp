@@ -1,4 +1,5 @@
 #include "AttendanceMainWindow.h"
+#include "AppVersion.h"
 
 #include <QApplication>
 #include <QDateTime>
@@ -41,7 +42,7 @@ int main(int argc, char* argv[])
     app.setApplicationName("AttendanceApp"); // Keep the existing application data location.
     app.setApplicationDisplayName(QStringLiteral("工时簿"));
     app.setOrganizationName("MyCompany");
-    app.setApplicationVersion("2026.09.06");
+    app.setApplicationVersion(QStringLiteral(ATTENDANCE_APP_VERSION));
 
     eApp->init();
     eTheme->setThemeMode(ElaThemeType::Light);

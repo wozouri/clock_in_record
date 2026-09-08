@@ -4,6 +4,7 @@ project(AttendanceUpdateService VERSION 1.0.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
+set(CMAKE_AUTORCC ON)
 
 if(MSVC)
     add_compile_options(/utf-8)
@@ -13,6 +14,7 @@ find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Core Network)
 
 add_executable(${PROJECT_NAME}
     main.cpp
+    resources.qrc
 )
 
 set_target_properties(${PROJECT_NAME} PROPERTIES

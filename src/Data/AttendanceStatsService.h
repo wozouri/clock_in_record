@@ -10,7 +10,9 @@ struct AttendanceDayView {
     bool needAverageCal = true;
     QString arrivalText;
     QString departureText;
+    bool hasMealAllowance = false;
     bool hasNote = false;
+    QString note;
 };
 
 struct MonthlyAttendanceSnapshot {
@@ -21,6 +23,7 @@ struct MonthlyAttendanceSnapshot {
     int totalLateMinutes = 0;
     int totalEarlyLeaveMinutes = 0;
     int mealAllowanceCount = 0;
+    bool showMealAllowanceMarker = false;
     QMap<QDate, AttendanceDayView> dayViews;
 };
 

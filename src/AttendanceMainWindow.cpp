@@ -14,11 +14,13 @@
 #include <QMessageBox>
 #include <QPushButton>
 #include <QFileDialog>
+#include <QIcon>
 #include <QApplication>
 #include <QAction>
 #include <QKeySequence>
 #include <QTimer>
 #include <ElaContentDialog.h>
+#include <ElaDialog.h>
 #include <ElaIconButton.h>
 #include <QPainter>
 #include <QPainterPath>
@@ -256,17 +258,38 @@ ElaTeachingTip::TailPosition preferredTipTail(ElaTeachingTip* tip) {
     }
     const QRect screenGeo = screen->availableGeometry();
     const QRect targetRect(topLeft, target->size());
-    const int tipHeight = tip->height() > 40 ? tip->height() : 180;
+    const int tipHeight = qMax(52, qMax(tip->height(), tip->sizeHint().height()));
     const int needed = tipHeight + 12;
     const int spaceAbove = targetRect.top() - screenGeo.top();
     const int spaceBelow = screenGeo.bottom() - targetRect.bottom();
-    if (spaceAbove >= needed) {
+    if (spaceAbove >= needed && spaceBelow < needed) {
         return ElaTeachingTip::Bottom;
     }
-    if (spaceBelow >= needed) {
+    if (spaceBelow >= needed && spaceAbove < needed) {
         return ElaTeachingTip::Top;
     }
     return spaceAbove >= spaceBelow ? ElaTeachingTip::Bottom : ElaTeachingTip::Top;
+}
+
+void scheduleContextTipShow(ElaTeachingTip* tip) {
+    tip->setProperty("contextTipRequested", true);
+    QTimer::singleShot(0, tip, [tip] {
+        if (!tip->property("contextTipRequested").toBool()) {
+            return;
+        }
+        tip->ensurePolished();
+        tip->adjustSize();
+        tip->setTailPosition(preferredTipTail(tip));
+        tip->showTip();
+    });
+}
+
+void hideContextTip(ElaTeachingTip* tip) {
+    if (!tip) {
+        return;
+    }
+    tip->setProperty("contextTipRequested", false);
+    tip->closeTip();
 }
 
 }  // namespace
@@ -306,7 +329,7 @@ private:
 };
 
 AttendanceMainWindow::AttendanceMainWindow(QWidget* parent) : ElaWindow(parent) {
-    setWindowTitle(QStringLiteral("工时簿 v%1").arg(QCoreApplication::applicationVersion()));
+    setWindowTitle(QStringLiteral("工时簿 %1").arg(QCoreApplication::applicationVersion()));
     setMinimumSize(1040, 680);
     resize(1180, 760);
 
@@ -760,8 +783,20 @@ void AttendanceMainWindow::setupUI() {
 
     m_workScheduleSettingsPage = new WorkScheduleSettingsPage();
     m_workScheduleSettingsPage->setWorkSchedule(AttendanceStorage::loadWorkSchedule());
+    m_workScheduleSettingsPage->setUpdateServiceEndpoint(
+        UpdateChecker::updateServiceHost(), UpdateChecker::updateServicePort());
     connect(m_workScheduleSettingsPage, &WorkScheduleSettingsPage::workScheduleSaved,
         this, &AttendanceMainWindow::onWorkScheduleChanged);
+    connect(m_workScheduleSettingsPage, &WorkScheduleSettingsPage::updateServiceEndpointSaved,
+        this, [this](const QString& host, quint16 port) {
+            UpdateChecker::saveUpdateServiceEndpoint(host, port);
+            if (m_updateChecker) {
+                m_updateChecker->setServiceBaseUrl(QUrl(UpdateChecker::updateServiceBaseUrl()));
+            }
+            showStatusMessage(QStringLiteral("更新服务器已更新"));
+        });
+    connect(m_workScheduleSettingsPage, &WorkScheduleSettingsPage::aboutRequested,
+        this, &AttendanceMainWindow::showAboutDialog);
 
     QString attendanceNavigationKey;
     addExpanderNode(QStringLiteral("考勤管理"), attendanceNavigationKey, ElaIconType::Calendar);
@@ -773,11 +808,16 @@ void AttendanceMainWindow::setupUI() {
     m_settingsRoutePage->setObjectName(QStringLiteral("workScheduleSettingsRoutePage"));
     addFooterNode(QStringLiteral("设置"), m_settingsRoutePage, settingsPageKey, 0,
         ElaIconType::Gear);
+
     navigation(calendarPage->property("ElaPageKey").toString());
 
     // 连接信号
     connect(m_calendar, &CustomCalendarWidget::dateDoubleClicked, this, &AttendanceMainWindow::onDateDoubleClicked);
     connect(m_calendar, &CustomCalendarWidget::selectionChanged, this, &AttendanceMainWindow::onSelectionChanged);
+    connect(m_calendar, &CustomCalendarWidget::pointerInsideChanged, this, [this](bool inside) {
+        m_isCalendarPointerInside = inside;
+        updateContextTips(m_calendar->selectedDates());
+    });
     connect(m_calendar, &CustomCalendarWidget::currentPageChanged,
         this, &AttendanceMainWindow::onMonthChanged);
     connect(m_calendar, &CustomCalendarWidget::yearOverviewVisibilityChanged,
@@ -1177,9 +1217,10 @@ void AttendanceMainWindow::updateBatchActionState() {
 void AttendanceMainWindow::updateContextTips(const QList<QDate>& dates) {
     const bool hasSingleRecord = dates.size() == 1
         && AttendanceStorage::hasArrivalRecord(dates.first());
+    const bool shouldShow = m_isCalendarPointerInside && !m_calendar->isYearOverviewVisible();
 
     // 相邻工具按钮无法同时承载两块持久提示，复制来源优先展示。
-    if (hasSingleRecord && !m_hasCopiedRecord) {
+    if (shouldShow && hasSingleRecord && !m_hasCopiedRecord) {
         const QDate date = dates.first();
         const AttendanceRecord record = AttendanceStorage::loadRecord(date);
         if (!m_copyContextTip) {
@@ -1194,13 +1235,12 @@ void AttendanceMainWindow::updateContextTips(const QList<QDate>& dates) {
         }
         m_copyContextTip->setTitle(recordTipSummary(date, record));
         m_copyContextTip->setContent(QString());
-        m_copyContextTip->setTailPosition(preferredTipTail(m_copyContextTip));
-        m_copyContextTip->showTip();
+        scheduleContextTipShow(m_copyContextTip);
     } else if (m_copyContextTip) {
-        m_copyContextTip->closeTip();
+        hideContextTip(m_copyContextTip);
     }
 
-    if (m_hasCopiedRecord) {
+    if (shouldShow && dates.size() == 1 && m_hasCopiedRecord) {
         if (!m_applyContextTip) {
             m_applyContextTip = new ElaTeachingTip(this);
             m_applyContextTip->setTailPosition(ElaTeachingTip::Auto);
@@ -1213,10 +1253,9 @@ void AttendanceMainWindow::updateContextTips(const QList<QDate>& dates) {
         }
         m_applyContextTip->setTitle(recordTipSummary(m_copiedFromDate, m_copiedRecord));
         m_applyContextTip->setContent(QString());
-        m_applyContextTip->setTailPosition(preferredTipTail(m_applyContextTip));
-        m_applyContextTip->showTip();
+        scheduleContextTipShow(m_applyContextTip);
     } else if (m_applyContextTip) {
-        m_applyContextTip->closeTip();
+        hideContextTip(m_applyContextTip);
     }
 }
 
@@ -1275,7 +1314,10 @@ void AttendanceMainWindow::updateMonthlyStatistics(const MonthlyAttendanceSnapsh
             QVariantMap info;
             info["arrivalTime"] = dayView.arrivalText;
             info["departureTime"] = dayView.departureText;
+            info["hasMealAllowance"] = snapshot.showMealAllowanceMarker
+                && dayView.hasMealAllowance;
             info["hasNote"] = dayView.hasNote;
+            info["note"] = dayView.note;
             m_calendar->setCustomData(date, info);
         }
     }
@@ -1599,6 +1641,55 @@ void AttendanceMainWindow::onUpdateCheckFinished(const UpdateReleaseInfo& info, 
                 QStringLiteral("当前已是最新版本。"), 3000, this);
         }
     }
+}
+
+void AttendanceMainWindow::showAboutDialog()
+{
+    auto* dialog = new ElaDialog(this);
+    dialog->setAttribute(Qt::WA_DeleteOnClose);
+    dialog->setWindowTitle(QStringLiteral("关于 %1").arg(QApplication::applicationDisplayName()));
+    dialog->setModal(true);
+    dialog->setFixedSize(410, 440);
+    dialog->setAppBarHeight(42);
+    dialog->setWindowButtonFlags(ElaAppBarType::CloseButtonHint);
+    dialog->setStyleSheet(QStringLiteral("ElaDialog { background: #ffffff; }"));
+
+    auto* contentLayout = new QVBoxLayout(dialog);
+    contentLayout->setContentsMargins(20, 12, 20, 18);
+    contentLayout->setSpacing(0);
+
+    auto* logoLabel = new QLabel(dialog);
+    logoLabel->setFixedSize(76, 76);
+    logoLabel->setPixmap(QIcon(QStringLiteral(":/Icons/logo.ico")).pixmap(76, 76));
+    contentLayout->addWidget(logoLabel, 0, Qt::AlignHCenter);
+    contentLayout->addSpacing(32);
+
+    auto* titleLabel = new QLabel(QStringLiteral("关于软件"), dialog);
+    titleLabel->setAlignment(Qt::AlignCenter);
+    titleLabel->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
+    titleLabel->setStyleSheet(QStringLiteral("color: #172b4d; font-size: 20px; font-weight: 600;"));
+    contentLayout->addWidget(titleLabel);
+    contentLayout->addSpacing(16);
+
+    auto* detailsLabel = new QLabel(
+        QStringLiteral("名称：工时簿\n版本：%1\n数据存储：本地 SQLite 数据库\n数据迁移：支持 JSON 导入与导出\n\n"
+                       "所有考勤记录仅保存于当前设备，可通过导出文件迁移。")
+            .arg(QCoreApplication::applicationVersion()), dialog);
+    detailsLabel->setWordWrap(true);
+    detailsLabel->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
+    detailsLabel->setStyleSheet(QStringLiteral("color: #40566f; font-size: 13px; line-height: 1.55;"));
+    contentLayout->addWidget(detailsLabel);
+    contentLayout->addStretch();
+
+    auto* confirmButton = new ElaPushButton(QStringLiteral("确定"), dialog);
+    confirmButton->setFixedSize(84, 32);
+    confirmButton->setCursor(Qt::PointingHandCursor);
+    confirmButton->setLightDefaultColor(QColor(QStringLiteral("#1769aa")));
+    confirmButton->setLightHoverColor(QColor(QStringLiteral("#0f5c9b")));
+    confirmButton->setLightTextColor(Qt::white);
+    connect(confirmButton, &ElaPushButton::clicked, dialog, &QDialog::accept);
+    contentLayout->addWidget(confirmButton, 0, Qt::AlignHCenter);
+    dialog->exec();
 }
 
 void AttendanceMainWindow::showUpdateConfirmDialog() {

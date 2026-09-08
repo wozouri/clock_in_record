@@ -7,6 +7,7 @@
 
 class ElaPlainTextEdit;
 class ElaToggleSwitch;
+class ElaIconButton;
 class QLabel;
 class QTimeEdit;
 
@@ -30,6 +31,7 @@ private:
     ElaToggleSwitch* m_needAverageCalCheckBox = nullptr;
     QTimeEdit* m_arrivalTimeEdit = nullptr;
     QTimeEdit* m_departureTimeEdit = nullptr;
+    ElaIconButton* m_noteEmojiButton = nullptr;
     ElaPlainTextEdit* m_noteEdit = nullptr;
     QLabel* m_resultLabel = nullptr;
 };

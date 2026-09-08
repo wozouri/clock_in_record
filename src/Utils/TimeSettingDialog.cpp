@@ -4,6 +4,7 @@
 #include "WorkTimeCalculator.h"
 
 #include <ElaGroupBox.h>
+#include <ElaIconButton.h>
 #include <ElaMessageBar.h>
 #include <ElaPlainTextEdit.h>
 #include <ElaPushButton.h>
@@ -11,11 +12,17 @@
 
 #include <QAbstractSpinBox>
 #include <QFormLayout>
+#include <QFrame>
+#include <QGridLayout>
+#include <QGuiApplication>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QScreen>
 #include <QStringList>
 #include <QTimeEdit>
 #include <QVBoxLayout>
+
+#include <iterator>
 
 namespace {
 
@@ -50,6 +57,27 @@ QString dialogGroupStyle()
         "ElaGroupBox::title { subcontrol-origin: margin; left: 14px; padding: 0 5px;"
         " color: #223550; font-weight: 600; }");
 }
+
+struct NoteEmoji {
+    ElaIconType::IconName icon;
+    const char* text;
+    const char* description;
+};
+
+constexpr NoteEmoji kNoteEmojis[] = {
+    {ElaIconType::FaceSmile, u8"🙂", "微笑"},
+    {ElaIconType::FaceGrin, u8"😀", "开心"},
+    {ElaIconType::FaceLaugh, u8"😄", "大笑"},
+    {ElaIconType::FaceSmileWink, u8"😉", "眨眼"},
+    {ElaIconType::FaceThinking, u8"🤔", "思考"},
+    {ElaIconType::FaceGrinHearts, u8"🥰", "喜欢"},
+    {ElaIconType::FaceGrinStars, u8"🤩", "惊喜"},
+    {ElaIconType::FaceSadTear, u8"😢", "难过"},
+    {ElaIconType::FaceTired, u8"😫", "疲惫"},
+    {ElaIconType::FaceSunglasses, u8"😎", "轻松"},
+    {ElaIconType::FaceParty, u8"🥳", "庆祝"},
+    {ElaIconType::FaceSaluting, u8"🫡", "收到"},
+};
 
 }
 
@@ -159,10 +187,25 @@ void TimeSettingDialog::setupUI()
     statisticsLayout->addStretch();
     recordLayout->addRow(QStringLiteral("统计"), statisticsRow);
 
-    m_noteEdit = new ElaPlainTextEdit(recordGroup);
+    auto* noteEditor = new QWidget(recordGroup);
+    auto* noteLayout = new QVBoxLayout(noteEditor);
+    noteLayout->setContentsMargins(0, 0, 0, 0);
+    noteLayout->setSpacing(5);
+
+    auto* noteTools = new QHBoxLayout();
+    noteTools->setContentsMargins(0, 0, 0, 0);
+    noteTools->addStretch();
+    m_noteEmojiButton = new ElaIconButton(ElaIconType::FaceSmile, 16, 32, 28, noteEditor);
+    m_noteEmojiButton->setToolTip(QStringLiteral("插入表情"));
+    m_noteEmojiButton->setCursor(Qt::PointingHandCursor);
+    noteTools->addWidget(m_noteEmojiButton);
+    noteLayout->addLayout(noteTools);
+
+    m_noteEdit = new ElaPlainTextEdit(noteEditor);
     m_noteEdit->setPlaceholderText(QStringLiteral("添加备注（可选）"));
     m_noteEdit->setFixedHeight(72);
-    recordLayout->addRow(QStringLiteral("备注"), m_noteEdit);
+    noteLayout->addWidget(m_noteEdit);
+    recordLayout->addRow(QStringLiteral("备注"), noteEditor);
     mainLayout->addWidget(recordGroup);
 
     auto* resultGroup = new ElaGroupBox(QStringLiteral("自动计算"), this);
@@ -194,6 +237,47 @@ void TimeSettingDialog::setupUI()
 
     connect(m_arrivalTimeEdit, &QTimeEdit::timeChanged, this, &TimeSettingDialog::calculateWorkTime);
     connect(m_departureTimeEdit, &QTimeEdit::timeChanged, this, &TimeSettingDialog::calculateWorkTime);
+    connect(m_noteEmojiButton, &ElaIconButton::clicked, this, [this] {
+        constexpr int kEmojiButtonSize = 34;
+        constexpr int kEmojiColumnCount = 4;
+        auto* picker = new QFrame(nullptr, Qt::Popup | Qt::FramelessWindowHint);
+        picker->setObjectName(QStringLiteral("noteEmojiPicker"));
+        picker->setAttribute(Qt::WA_DeleteOnClose);
+        picker->setStyleSheet(QStringLiteral(
+            "QFrame#noteEmojiPicker { background: #ffffff; border: 1px solid #d4e2ef; border-radius: 8px; }"));
+
+        auto* pickerLayout = new QGridLayout(picker);
+        pickerLayout->setContentsMargins(8, 8, 8, 8);
+        pickerLayout->setHorizontalSpacing(4);
+        pickerLayout->setVerticalSpacing(4);
+        for (int index = 0; index < std::size(kNoteEmojis); ++index) {
+            const NoteEmoji& emoji = kNoteEmojis[index];
+            auto* emojiButton = new ElaIconButton(emoji.icon, 17, kEmojiButtonSize, kEmojiButtonSize, picker);
+            emojiButton->setToolTip(QString::fromUtf8(emoji.description));
+            emojiButton->setCursor(Qt::PointingHandCursor);
+            emojiButton->setLightHoverColor(QColor(QStringLiteral("#e9f3ff")));
+            emojiButton->setLightIconColor(QColor(QStringLiteral("#40566f")));
+            emojiButton->setLightHoverIconColor(QColor(QStringLiteral("#1769aa")));
+            connect(emojiButton, &ElaIconButton::clicked, this, [this, picker, text = QString::fromUtf8(emoji.text)] {
+                m_noteEdit->setFocus();
+                m_noteEdit->textCursor().insertText(text);
+                picker->close();
+            });
+            pickerLayout->addWidget(emojiButton, index / kEmojiColumnCount, index % kEmojiColumnCount);
+        }
+
+        picker->adjustSize();
+        QPoint position = m_noteEmojiButton->mapToGlobal(
+            QPoint(m_noteEmojiButton->width() - picker->width(), m_noteEmojiButton->height() + 4));
+        QScreen* screen = QGuiApplication::screenAt(position);
+        const QRect availableGeometry = (screen ? screen : QGuiApplication::primaryScreen())->availableGeometry();
+        position.setX(qBound(availableGeometry.left(), position.x(), availableGeometry.right() - picker->width() + 1));
+        if (position.y() + picker->height() > availableGeometry.bottom() + 1) {
+            position.setY(m_noteEmojiButton->mapToGlobal(QPoint(0, -4)).y() - picker->height());
+        }
+        picker->move(position);
+        picker->show();
+    });
 }
 
 void TimeSettingDialog::loadRecord()

@@ -14,6 +14,7 @@ class QContextMenuEvent;
 class QMouseEvent;
 class QPaintEvent;
 class QWheelEvent;
+class CalendarNoteTip;
 
 // A purpose-built attendance month view. It owns the grid layout, rendering and
 // selection model so attendance states are not constrained by QCalendarWidget.
@@ -47,8 +48,10 @@ signals:
     void dateDoubleClicked(const QDate& date);
     void copyRequested(const QDate& date);
     void deleteRequested(const QList<QDate>& dates);
+    void pointerInsideChanged(bool inside);
 
 protected:
+    void enterEvent(QEvent* event) override;
     void paintEvent(QPaintEvent* event) override;
     void mousePressEvent(QMouseEvent* event) override;
     void mouseMoveEvent(QMouseEvent* event) override;
@@ -80,10 +83,12 @@ private:
     bool isDateSelected(const QDate& date) const;
     bool isCurrentPageDate(const QDate& date) const;
     void updateHoveredDate(const QPoint& position);
+    void refreshHoveredNoteTip();
     void refreshYearRecordDates();
     void paintYearOverview(QPainter& painter);
 
     QMap<QDate, QVariantMap> m_data;
+    CalendarNoteTip* m_noteTip = nullptr;
     QMap<QDate, QColor> m_dayBackgrounds;
     QSet<QDate> m_yearRecordDates;
     QList<QDate> m_selectedDates;

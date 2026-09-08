@@ -2,7 +2,7 @@
 # 用法示例:
 #   powershell -File scripts/make_update_package.ps1 `
 #       -SourceDir "out/build/vs2022-RelWithDebInfo/RelWithDebInfo" `
-#       -Version "1.1.0" -Notes "修复若干问题。" `
+#       -Version "v2026.09.07" -Notes "修复若干问题。" `
 #       -UpdatesDir "D:/AttendanceUpdates"
 # 产物:
 #   <UpdatesDir>/packages/AttendanceApp-<Version>.zip
@@ -19,8 +19,8 @@ $ErrorActionPreference = "Stop"
 if (-not (Test-Path (Join-Path $SourceDir "AttendanceApp.exe"))) {
     throw "SourceDir 下找不到 AttendanceApp.exe: $SourceDir"
 }
-if ($Version -notmatch '^\d+(\.\d+){2,}$') {
-    throw "版本号必须为点分数字，如 1.1.0: $Version"
+if ($Version -notmatch '^v\d{4}\.\d{2}\.\d{2}$') {
+    throw "版本号必须为 vYYYY.MM.DD，例如 v2026.09.07: $Version"
 }
 
 $packageDir = Join-Path $UpdatesDir "packages"
@@ -47,6 +47,7 @@ $hash = (Get-FileHash -LiteralPath $zipPath -Algorithm SHA256).Hash.ToLowerInvar
 $manifest = [ordered]@{
     available   = $true
     version     = $Version
+    publishedAt = (Get-Date).ToString("yyyy-MM-dd HH:mm")
     notes       = $Notes
     downloadUrl = ("/packages/AttendanceApp-{0}.zip" -f $Version)
     sha256      = $hash

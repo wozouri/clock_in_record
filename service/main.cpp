@@ -1,10 +1,15 @@
 #include <QCoreApplication>
+#include <QDate>
 #include <QDateTime>
 #include <QDir>
 #include <QEventLoop>
 #include <QFile>
 #include <QFileInfo>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QJsonParseError>
 #include <QMetaObject>
+#include <QRegularExpression>
 #include <QSettings>
 #include <QTcpServer>
 #include <QTcpSocket>
@@ -22,6 +27,7 @@ namespace {
 constexpr wchar_t kDefaultServiceName[] = L"AttendanceUpdateService";
 constexpr wchar_t kServiceDisplayName[] = L"工时簿更新服务";
 constexpr wchar_t kServiceDescription[] = L"为工时簿提供本地更新分发服务。";
+constexpr int kDailyDownloadLimit = 50;
 
 QEventLoop* g_serviceLoop = nullptr;
 SERVICE_STATUS_HANDLE g_serviceStatusHandle = nullptr;
@@ -67,6 +73,72 @@ struct ServiceConfig {
     QString root;
 };
 
+bool isSafePackageName(const QString& packageName)
+{
+    if (packageName.isEmpty()) {
+        return false;
+    }
+    for (const QChar character : packageName) {
+        if (!character.isLetterOrNumber() && character != QLatin1Char('.')
+            && character != QLatin1Char('-') && character != QLatin1Char('_')) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool isReleaseVersion(const QString& version)
+{
+    static const QRegularExpression expression(
+        QStringLiteral("^v(\\d{4})\\.(\\d{2})\\.(\\d{2})$"));
+    const QRegularExpressionMatch match = expression.match(version);
+    if (!match.hasMatch()) {
+        return false;
+    }
+    return QDate(match.captured(1).toInt(), match.captured(2).toInt(), match.captured(3).toInt())
+        .isValid();
+}
+
+class DailyDownloadQuota {
+public:
+    void setStoragePath(const QString& storagePath)
+    {
+        m_storagePath = storagePath;
+        QSettings settings(m_storagePath, QSettings::IniFormat);
+        m_day = settings.value(QStringLiteral("downloads/date")).toString();
+        m_count = qMax(0, settings.value(QStringLiteral("downloads/count"), 0).toInt());
+        resetIfNeeded();
+    }
+
+    bool tryConsume()
+    {
+        resetIfNeeded();
+        if (m_count >= kDailyDownloadLimit) {
+            return false;
+        }
+        ++m_count;
+        QSettings settings(m_storagePath, QSettings::IniFormat);
+        settings.setValue(QStringLiteral("downloads/date"), m_day);
+        settings.setValue(QStringLiteral("downloads/count"), m_count);
+        settings.sync();
+        return true;
+    }
+
+private:
+    void resetIfNeeded()
+    {
+        const QString today = QDate::currentDate().toString(Qt::ISODate);
+        if (m_day != today) {
+            m_day = today;
+            m_count = 0;
+        }
+    }
+
+    QString m_storagePath;
+    QString m_day;
+    int m_count = 0;
+};
+
 ServiceConfig loadConfig()
 {
     ServiceConfig config;
@@ -87,7 +159,12 @@ class UpdateHttpServer : public QTcpServer {
 public:
     explicit UpdateHttpServer(QObject* parent = nullptr) : QTcpServer(parent) {}
 
-    void setUpdateRoot(const QString& root) { m_updateRoot = root; }
+    void setUpdateRoot(const QString& root)
+    {
+        m_updateRoot = root;
+        m_downloadQuota.setStoragePath(
+            QDir(m_updateRoot).filePath(QStringLiteral("download-quota.ini")));
+    }
 
 signals:
     void requestHandled(const QString& summary);
@@ -134,6 +211,14 @@ private:
             sendSimpleResponse(socket, 200, "OK", "text/plain", "ok");
             return;
         }
+        if (path == QStringLiteral("/") || path == QStringLiteral("/index.html")) {
+            serveDownloadPage(socket);
+            return;
+        }
+        if (path == QStringLiteral("/assets/logo.svg")) {
+            serveFile(socket, QStringLiteral(":/download/logo.svg"), QStringLiteral("image/svg+xml"));
+            return;
+        }
         if (path == QStringLiteral("/api/client/release")) {
             serveFile(socket, QDir(m_updateRoot).filePath(QStringLiteral("manifest.json")),
                 QStringLiteral("application/json; charset=utf-8"));
@@ -141,19 +226,87 @@ private:
         }
         if (path.startsWith(QStringLiteral("/packages/"))) {
             const QString packageName = path.mid(QStringLiteral("/packages/").size());
-            if (packageName.isEmpty() || packageName.contains(QLatin1Char('/'))) {
+            if (!isSafePackageName(packageName)) {
                 sendSimpleResponse(socket, 400, "Bad Request", "text/plain", "invalid package");
                 return;
             }
-            serveFile(socket,
-                QDir(QDir(m_updateRoot).filePath(QStringLiteral("packages"))).filePath(packageName),
-                QStringLiteral("application/octet-stream"));
+            const QString packagePath =
+                QDir(QDir(m_updateRoot).filePath(QStringLiteral("packages"))).filePath(packageName);
+            if (!QFileInfo(packagePath).isFile()) {
+                serveFile(socket, packagePath, QStringLiteral("application/octet-stream"), true);
+                return;
+            }
+            if (!m_downloadQuota.tryConsume()) {
+                sendSimpleResponse(socket, 429, "Too Many Requests", "text/plain; charset=utf-8",
+                    QStringLiteral("今天的客户端下载次数已达上限，请明天再试。"));
+                return;
+            }
+            serveFile(socket, packagePath, QStringLiteral("application/octet-stream"), true);
             return;
         }
         sendSimpleResponse(socket, 404, "Not Found", "text/plain", "not found");
     }
 
-    void serveFile(QTcpSocket* socket, const QString& filePath, const QString& contentType) {
+    void serveDownloadPage(QTcpSocket* socket) {
+        QJsonObject manifest;
+        QFile manifestFile(QDir(m_updateRoot).filePath(QStringLiteral("manifest.json")));
+        if (manifestFile.open(QIODevice::ReadOnly)) {
+            QJsonParseError parseError;
+            const QJsonDocument document = QJsonDocument::fromJson(manifestFile.readAll(), &parseError);
+            if (parseError.error == QJsonParseError::NoError && document.isObject()) {
+                manifest = document.object();
+            }
+        }
+
+        const QString version = manifest.value(QStringLiteral("version")).toString().trimmed();
+        const QString downloadPath = manifest.value(QStringLiteral("downloadUrl")).toString().trimmed();
+        const QString packageName = downloadPath.mid(QStringLiteral("/packages/").size());
+        const QFileInfo packageInfo(QDir(QDir(m_updateRoot).filePath(QStringLiteral("packages")))
+            .filePath(packageName));
+        const bool isAvailable = manifest.value(QStringLiteral("available")).toBool()
+            && isReleaseVersion(version)
+            && downloadPath.startsWith(QStringLiteral("/packages/"))
+            && isSafePackageName(packageName)
+            && packageInfo.isFile();
+
+        const QString escapedVersion = version.toHtmlEscaped();
+        const QString releaseSection = isAvailable
+            ? QStringLiteral(
+                "<span class=\"version\">%1</span>"
+                "<a class=\"download\" href=\"%2\">下载 Windows 客户端</a>")
+                  .arg(escapedVersion, downloadPath.toHtmlEscaped())
+            : QStringLiteral("<span class=\"unavailable\">暂无可下载版本</span>");
+
+        const QString page = QStringLiteral(R"(<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>工时簿 - Windows 客户端下载</title>
+<style>
+:root { color: #182b43; background: #f6f8fb; font-family: "Microsoft YaHei", "Segoe UI", sans-serif; }
+* { box-sizing: border-box; }
+body { margin: 0; min-height: 100vh; display: grid; place-items: center; }
+main { width: min(100%, 480px); padding: 28px; }
+header { display: flex; align-items: center; gap: 11px; color: #1b4f80; font-size: 15px; font-weight: 700; }
+header img { width: 34px; height: 34px; }
+.content { display: flex; align-items: center; gap: 20px; margin-top: 44px; padding: 22px 0; border-top: 1px solid #dbe4ec; border-bottom: 1px solid #dbe4ec; }
+.version { color: #203b57; font-size: 20px; font-weight: 700; }
+.download { display: inline-flex; align-items: center; justify-content: center; min-height: 42px; margin-left: auto; padding: 0 18px; background: #1769aa; border: 1px solid #0f5c9b; border-radius: 5px; color: #fff; font-size: 14px; font-weight: 700; text-decoration: none; }
+.download:hover { background: #0f5c9b; }
+.unavailable { color: #65778a; font-size: 14px; }
+@media (max-width: 420px) { main { padding: 22px 20px; } .content { align-items: stretch; flex-direction: column; gap: 16px; } .download { margin-left: 0; } }
+</style>
+</head>
+<body><main>
+<header><img src="/assets/logo.svg" alt="工时簿"><span>工时簿</span></header>
+<section class="content">%1</section>
+</main></body></html>)").arg(releaseSection);
+        sendSimpleResponse(socket, 200, "OK", "text/html; charset=utf-8", page);
+    }
+
+    void serveFile(QTcpSocket* socket, const QString& filePath, const QString& contentType,
+        bool asDownload = false) {
         QFile file(filePath);
         if (!file.open(QIODevice::ReadOnly)) {
             sendSimpleResponse(socket, 404, "Not Found", "application/json; charset=utf-8",
@@ -165,6 +318,10 @@ private:
         response += "HTTP/1.1 200 OK\r\n";
         response += "Content-Type: " + contentType.toLatin1() + "\r\n";
         response += "Content-Length: " + QByteArray::number(body.size()) + "\r\n";
+        if (asDownload) {
+            response += "Content-Disposition: attachment; filename=\""
+                + QFileInfo(filePath).fileName().toUtf8() + "\"\r\n";
+        }
         response += "Cache-Control: no-cache\r\n";
         response += "Connection: close\r\n\r\n";
         response += body;
@@ -192,6 +349,7 @@ private:
     }
 
     QString m_updateRoot;
+    DailyDownloadQuota m_downloadQuota;
     QMap<QTcpSocket*, QByteArray> m_buffers;
 };
 

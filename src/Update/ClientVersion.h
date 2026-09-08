@@ -5,7 +5,7 @@
 
 namespace attendance {
 
-// 点分纯数字版本号，如 1.0.0。
+// 发布版本号格式：vYYYY.MM.DD，例如 v2026.09.07。
 bool isValidClientVersion(const QString& version);
 
 // 左侧小于/等于/大于右侧时返回 -1/0/1；无法解析的版本返回 0。

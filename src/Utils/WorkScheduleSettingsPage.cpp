@@ -1,6 +1,8 @@
 #include "WorkScheduleSettingsPage.h"
 
 #include <ElaGroupBox.h>
+#include <ElaIcon.h>
+#include <ElaLineEdit.h>
 #include <ElaPushButton.h>
 #include <ElaText.h>
 #include <ElaToggleSwitch.h>
@@ -9,6 +11,9 @@
 #include <QAbstractSpinBox>
 #include <QGraphicsDropShadowEffect>
 #include <QHBoxLayout>
+#include <QAbstractSocket>
+#include <QHostAddress>
+#include <QIntValidator>
 #include <QLabel>
 #include <QMessageBox>
 #include <QStyle>
@@ -43,6 +48,9 @@ WorkScheduleSettingsPage::WorkScheduleSettingsPage(QWidget* parent)
         "QTimeEdit[hasPendingChange=\"true\"] { color: #734500; background: #fff8e8;"
         " border: 1px solid #e6ad55; }"
         "QTimeEdit[hasPendingChange=\"true\"]:focus { border-color: #d78b20; }"
+        "ElaLineEdit[hasPendingChange=\"true\"] { color: #734500; background: #fff8e8;"
+        " border: 1px solid #e6ad55; }"
+        "ElaLineEdit[hasPendingChange=\"true\"]:focus { border-color: #d78b20; }"
         "QTimeEdit:disabled { color: #9aa8b5; background: #f3f5f7; border-color: #e0e6ec; }"));
 
     auto* mainLayout = new QVBoxLayout(this);
@@ -68,6 +76,18 @@ WorkScheduleSettingsPage::WorkScheduleSettingsPage(QWidget* parent)
     m_saveButton->setLightHoverColor(QColor(QStringLiteral("#0f5c9b")));
     m_saveButton->setLightTextColor(Qt::white);
     connect(m_saveButton, &ElaPushButton::clicked, this, &WorkScheduleSettingsPage::saveWorkSchedule);
+
+    auto* aboutButton = new ElaPushButton(QStringLiteral("关于"), this);
+    aboutButton->setIcon(ElaIcon::getInstance()->getElaIcon(ElaIconType::CircleInfo, 15));
+    aboutButton->setIconSize(QSize(15, 15));
+    aboutButton->setMinimumSize(86, 34);
+    aboutButton->setCursor(Qt::PointingHandCursor);
+    aboutButton->setStyleSheet(QStringLiteral(
+        "QPushButton { color: #40566f; background: #ffffff; border: 1px solid #cfdbe7;"
+        " border-radius: 5px; padding: 0 12px; }"
+        "QPushButton:hover { color: #1769aa; background: #edf4fb; border-color: #9ebdd8; }"));
+    connect(aboutButton, &ElaPushButton::clicked, this, &WorkScheduleSettingsPage::aboutRequested);
+    headerLayout->addWidget(aboutButton);
     headerLayout->addWidget(m_saveButton);
     mainLayout->addLayout(headerLayout);
 
@@ -134,10 +154,36 @@ WorkScheduleSettingsPage::WorkScheduleSettingsPage(QWidget* parent)
     mealAllowanceLayout->setContentsMargins(20, 24, 20, 18);
     mealAllowanceLayout->setHorizontalSpacing(12);
     m_mealAllowanceTimeEdit = createTimeEdit();
+    m_showMealAllowanceMarkerCheckBox = new ElaToggleSwitch(mealAllowanceGroup);
+    m_showMealAllowanceMarkerCheckBox->setToolTip(QStringLiteral("在日历中显示餐补标志"));
     mealAllowanceLayout->addWidget(createFieldLabel(QStringLiteral("餐补起算"), mealAllowanceGroup), 0, 0);
     mealAllowanceLayout->addWidget(m_mealAllowanceTimeEdit, 0, 1);
+    mealAllowanceLayout->addWidget(createFieldLabel(QStringLiteral("显示标志"), mealAllowanceGroup), 0, 2);
+    mealAllowanceLayout->addWidget(m_showMealAllowanceMarkerCheckBox, 0, 3);
     mealAllowanceLayout->setColumnStretch(1, 1);
+    mealAllowanceLayout->setColumnStretch(3, 1);
     panelLayout->addWidget(mealAllowanceGroup);
+
+    auto* updateGroup = new ElaGroupBox(QStringLiteral("更新服务"), settingsPanel);
+    updateGroup->setStyleSheet(workGroup->styleSheet());
+    auto* updateLayout = new QGridLayout(updateGroup);
+    updateLayout->setContentsMargins(20, 24, 20, 18);
+    updateLayout->setHorizontalSpacing(12);
+    m_updateServerHostEdit = new ElaLineEdit(updateGroup);
+    m_updateServerHostEdit->setPlaceholderText(QStringLiteral("例如 192.168.3.35"));
+    m_updateServerHostEdit->setMinimumWidth(220);
+    m_updateServerHostEdit->setFixedHeight(34);
+    m_updateServerPortEdit = new ElaLineEdit(updateGroup);
+    m_updateServerPortEdit->setValidator(new QIntValidator(1, 65535, m_updateServerPortEdit));
+    m_updateServerPortEdit->setMinimumWidth(100);
+    m_updateServerPortEdit->setFixedHeight(34);
+    updateLayout->addWidget(createFieldLabel(QStringLiteral("服务器 IP"), updateGroup), 0, 0);
+    updateLayout->addWidget(m_updateServerHostEdit, 0, 1);
+    updateLayout->addWidget(createFieldLabel(QStringLiteral("端口"), updateGroup), 0, 2);
+    updateLayout->addWidget(m_updateServerPortEdit, 0, 3);
+    updateLayout->setColumnStretch(1, 1);
+    updateLayout->setColumnStretch(3, 1);
+    panelLayout->addWidget(updateGroup);
 
     mainLayout->addWidget(settingsPanel);
     mainLayout->addStretch();
@@ -156,6 +202,14 @@ WorkScheduleSettingsPage::WorkScheduleSettingsPage(QWidget* parent)
     m_dinnerBreakChangeEffect->setEnabled(false);
     m_dinnerBreakEnabledCheckBox->setGraphicsEffect(m_dinnerBreakChangeEffect);
 
+    m_mealAllowanceMarkerChangeEffect =
+        new QGraphicsDropShadowEffect(m_showMealAllowanceMarkerCheckBox);
+    m_mealAllowanceMarkerChangeEffect->setBlurRadius(10);
+    m_mealAllowanceMarkerChangeEffect->setOffset(0, 0);
+    m_mealAllowanceMarkerChangeEffect->setColor(QColor(QStringLiteral("#e6ad55")));
+    m_mealAllowanceMarkerChangeEffect->setEnabled(false);
+    m_showMealAllowanceMarkerCheckBox->setGraphicsEffect(m_mealAllowanceMarkerChangeEffect);
+
     connect(m_lunchBreakEnabledCheckBox, &ElaToggleSwitch::toggled,
         this, &WorkScheduleSettingsPage::updateLunchBreakState);
     connect(m_dinnerBreakEnabledCheckBox, &ElaToggleSwitch::toggled,
@@ -170,6 +224,9 @@ WorkScheduleSettingsPage::WorkScheduleSettingsPage(QWidget* parent)
     connect(m_mealAllowanceTimeEdit, &QTimeEdit::timeChanged, this, updateChanges);
     connect(m_lunchBreakEnabledCheckBox, &ElaToggleSwitch::toggled, this, updateChanges);
     connect(m_dinnerBreakEnabledCheckBox, &ElaToggleSwitch::toggled, this, updateChanges);
+    connect(m_showMealAllowanceMarkerCheckBox, &ElaToggleSwitch::toggled, this, updateChanges);
+    connect(m_updateServerHostEdit, &ElaLineEdit::textChanged, this, updateChanges);
+    connect(m_updateServerPortEdit, &ElaLineEdit::textChanged, this, updateChanges);
 }
 
 void WorkScheduleSettingsPage::setWorkSchedule(const WorkSchedule& schedule)
@@ -184,8 +241,18 @@ void WorkScheduleSettingsPage::setWorkSchedule(const WorkSchedule& schedule)
     m_dinnerBreakStartEdit->setTime(schedule.dinnerBreakStart);
     m_dinnerBreakEndEdit->setTime(schedule.dinnerBreakEnd);
     m_mealAllowanceTimeEdit->setTime(schedule.mealAllowanceTime);
+    m_showMealAllowanceMarkerCheckBox->setIsToggled(schedule.showMealAllowanceMarker);
     updateLunchBreakState(schedule.lunchBreakEnabled);
     updateDinnerBreakState(schedule.dinnerBreakEnabled);
+    updateChangeState();
+}
+
+void WorkScheduleSettingsPage::setUpdateServiceEndpoint(const QString& host, quint16 port)
+{
+    m_savedUpdateServerHost = host.trimmed();
+    m_savedUpdateServerPort = port;
+    m_updateServerHostEdit->setText(m_savedUpdateServerHost);
+    m_updateServerPortEdit->setText(QString::number(m_savedUpdateServerPort));
     updateChangeState();
 }
 
@@ -213,9 +280,28 @@ void WorkScheduleSettingsPage::saveWorkSchedule()
         return;
     }
 
+    QHostAddress serverAddress;
+    const QString serverHost = m_updateServerHostEdit->text().trimmed();
+    bool portValid = false;
+    const uint portValue = m_updateServerPortEdit->text().toUInt(&portValid);
+    if (!serverAddress.setAddress(serverHost)
+        || serverAddress.protocol() != QAbstractSocket::IPv4Protocol
+        || !portValid || portValue == 0 || portValue > 65535) {
+        QMessageBox::warning(this, QStringLiteral("无法保存"),
+            QStringLiteral("更新服务器需要填写有效的 IPv4 地址和端口。"));
+        return;
+    }
+
     const WorkSchedule schedule = currentWorkSchedule();
+    const QString normalizedServerHost = serverAddress.toString();
+    const quint16 serverPort = static_cast<quint16>(portValue);
     emit workScheduleSaved(schedule);
+    if (normalizedServerHost != m_savedUpdateServerHost || serverPort != m_savedUpdateServerPort) {
+        emit updateServiceEndpointSaved(normalizedServerHost, serverPort);
+    }
     m_savedSchedule = schedule;
+    m_savedUpdateServerHost = normalizedServerHost;
+    m_savedUpdateServerPort = serverPort;
     updateChangeState();
 }
 
@@ -231,6 +317,7 @@ WorkSchedule WorkScheduleSettingsPage::currentWorkSchedule() const
     schedule.dinnerBreakStart = m_dinnerBreakStartEdit->time();
     schedule.dinnerBreakEnd = m_dinnerBreakEndEdit->time();
     schedule.mealAllowanceTime = m_mealAllowanceTimeEdit->time();
+    schedule.showMealAllowanceMarker = m_showMealAllowanceMarkerCheckBox->getIsToggled();
     return schedule;
 }
 
@@ -245,7 +332,10 @@ void WorkScheduleSettingsPage::updateChangeState()
         || current.dinnerBreakEnabled != m_savedSchedule.dinnerBreakEnabled
         || current.dinnerBreakStart != m_savedSchedule.dinnerBreakStart
         || current.dinnerBreakEnd != m_savedSchedule.dinnerBreakEnd
-        || current.mealAllowanceTime != m_savedSchedule.mealAllowanceTime;
+        || current.mealAllowanceTime != m_savedSchedule.mealAllowanceTime
+        || current.showMealAllowanceMarker != m_savedSchedule.showMealAllowanceMarker
+        || m_updateServerHostEdit->text().trimmed() != m_savedUpdateServerHost
+        || m_updateServerPortEdit->text().trimmed() != QString::number(m_savedUpdateServerPort);
     m_pendingChangesLabel->setVisible(hasChanges);
     m_saveButton->setEnabled(hasChanges);
 
@@ -256,12 +346,26 @@ void WorkScheduleSettingsPage::updateChangeState()
     updateTimeEditChangeState(m_dinnerBreakStartEdit, m_savedSchedule.dinnerBreakStart);
     updateTimeEditChangeState(m_dinnerBreakEndEdit, m_savedSchedule.dinnerBreakEnd);
     updateTimeEditChangeState(m_mealAllowanceTimeEdit, m_savedSchedule.mealAllowanceTime);
+    updateLineEditChangeState(m_updateServerHostEdit, m_savedUpdateServerHost);
+    updateLineEditChangeState(m_updateServerPortEdit, QString::number(m_savedUpdateServerPort));
     updateToggleChangeState(m_lunchBreakEnabledCheckBox, m_lunchBreakChangeEffect,
         current.lunchBreakEnabled != m_savedSchedule.lunchBreakEnabled,
         m_savedSchedule.lunchBreakEnabled, QStringLiteral("午休"));
     updateToggleChangeState(m_dinnerBreakEnabledCheckBox, m_dinnerBreakChangeEffect,
         current.dinnerBreakEnabled != m_savedSchedule.dinnerBreakEnabled,
         m_savedSchedule.dinnerBreakEnabled, QStringLiteral("晚餐休息"));
+    updateToggleChangeState(m_showMealAllowanceMarkerCheckBox, m_mealAllowanceMarkerChangeEffect,
+        current.showMealAllowanceMarker != m_savedSchedule.showMealAllowanceMarker,
+        m_savedSchedule.showMealAllowanceMarker, QStringLiteral("餐补标志"));
+}
+
+void WorkScheduleSettingsPage::updateLineEditChangeState(ElaLineEdit* editor, const QString& originalValue)
+{
+    const bool changed = editor->text().trimmed() != originalValue;
+    editor->setProperty("hasPendingChange", changed);
+    editor->setToolTip(changed ? QStringLiteral("原设置：%1").arg(originalValue) : QString());
+    editor->style()->unpolish(editor);
+    editor->style()->polish(editor);
 }
 
 void WorkScheduleSettingsPage::updateTimeEditChangeState(QTimeEdit* editor, const QTime& originalTime)
