@@ -10,7 +10,8 @@ if(MSVC)
     add_compile_options(/utf-8)
 endif()
 
-find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Core Network)
+find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Core)
+find_package(Drogon CONFIG REQUIRED)
 
 add_executable(${PROJECT_NAME}
     main.cpp
@@ -23,7 +24,7 @@ set_target_properties(${PROJECT_NAME} PROPERTIES
 
 target_link_libraries(${PROJECT_NAME}
     Qt${QT_VERSION_MAJOR}::Core
-    Qt${QT_VERSION_MAJOR}::Network
+    Drogon::Drogon
 )
 
 if(WIN32)

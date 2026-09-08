@@ -34,6 +34,34 @@ cmake --build out/build/x64-RelWithDebInfo --config RelWithDebInfo
   `HKEY_CURRENT_USER\Software\MyCompany\AttendanceApp` 导入考勤记录和工作制度；旧数据不会自动删除。
 - 迁移或备份时，在程序关闭后复制 `attendance.db` 即可；也可以继续使用应用内 JSON 导出。
 
+## 发布
+
+构建目录会同时产出客户端 `AttendanceApp.exe` 与更新服务
+`AttendanceUpdateService.exe`，两者是独立交付物。发布客户端时使用
+`scripts/make_update_package.ps1`，脚本会：
+
+- 使用 `windeployqt` 准备客户端与 Qt 运行时目录；
+- 生成供客户端自动更新使用的 ZIP；
+- 使用 Inno Setup 分别生成客户端与更新服务 Windows 安装程序；
+- 写入更新服务读取的 `manifest.json`。
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\make_update_package.ps1 `
+  -SourceDir out\build\vs2022-RelWithDebInfo\RelWithDebInfo `
+  -Version v2026.09.08 `
+  -UpdatesDir D:\AttendanceUpdates
+```
+
+需要将 `windeployqt.exe` 和 `ISCC.exe` 加入 `PATH`；也可以通过
+`-WindeployQtPath`、`-IsccPath` 显式传入路径。产物分别位于
+`packages`（自更新 ZIP）和 `installers`（Inno 安装程序）。下载服务网页会优先分发客户端安装程序，
+客户端更新接口只使用 ZIP。
+
+更新服务安装程序以管理员权限部署到 `C:\Program Files\AttendanceUpdateService` 并注册为
+Windows 服务，默认监听 `0.0.0.0:47980`。
+首次安装会在安装目录生成 `updateservice.ini`；升级不会覆盖该文件。安装完成后，
+将客户端“更新服务”设置中的 IP 和端口指向部署机器即可。
+
 ## Git 提交规范
 
 建议使用 Conventional Commits 风格，便于维护历史与生成变更日志：
