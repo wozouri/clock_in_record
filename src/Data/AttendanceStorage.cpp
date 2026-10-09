@@ -19,6 +19,8 @@ namespace {
 constexpr auto kTimeFormat = "hh:mm";
 constexpr auto kConnectionName = "attendance-storage";
 constexpr auto kSchemaVersion = 4;
+// 已发布的版本 5、6 只给 records 增加字段，现有查询仍兼容。
+constexpr auto kCompatibleSchemaVersion = 6;
 
 QTime readTime(const QString& value, const QTime& fallback)
 {
@@ -120,8 +122,11 @@ bool writeRecord(QSqlDatabase database, const QDate& date, const AttendanceRecor
 {
     QSqlQuery query(database);
     query.prepare(
-        "INSERT OR REPLACE INTO records "
-        "(record_date, need_average_cal, arrival_time, departure_time, note) VALUES (?, ?, ?, ?, ?)");
+        "INSERT INTO records "
+        "(record_date, need_average_cal, arrival_time, departure_time, note) VALUES (?, ?, ?, ?, ?) "
+        "ON CONFLICT(record_date) DO UPDATE SET "
+        "need_average_cal = excluded.need_average_cal, arrival_time = excluded.arrival_time, "
+        "departure_time = excluded.departure_time, note = excluded.note");
     query.addBindValue(date.toString("yyyy-MM-dd"));
     query.addBindValue(record.needAverageCal);
     query.addBindValue(record.arrivalTime.toString(kTimeFormat));
@@ -216,11 +221,11 @@ bool migrateLegacySettings(QSqlDatabase database)
 
 bool migrateSchema(QSqlDatabase database, int currentVersion)
 {
-    if (currentVersion > kSchemaVersion) {
+    if (currentVersion > kCompatibleSchemaVersion) {
         qWarning() << "Attendance database schema is newer than this application:" << currentVersion;
         return false;
     }
-    if (currentVersion == kSchemaVersion) {
+    if (currentVersion >= kSchemaVersion) {
         return true;
     }
     if (!database.transaction()) {
@@ -314,6 +319,26 @@ QSqlDatabase storageDatabase()
     return database;
 }
 
+}
+
+bool AttendanceStorage::initialize(QString& errorMessage)
+{
+    errorMessage.clear();
+    const QSqlDatabase database = storageDatabase();
+    if (database.isOpen()) {
+        return true;
+    }
+    const QSqlDatabase opened = openDatabase();
+    QSqlQuery query(opened);
+    if (query.exec("SELECT value FROM schema_info WHERE key = 'schema_version'")
+        && query.next() && query.value(0).toInt() > kCompatibleSchemaVersion) {
+        errorMessage = QStringLiteral("数据库结构版本为 %1，当前程序最多支持版本 %2，请安装较新的客户端。原数据未被删除。")
+            .arg(query.value(0).toInt()).arg(kCompatibleSchemaVersion);
+    } else {
+        errorMessage = QStringLiteral("无法打开或初始化考勤数据库，请检查文件权限及数据库完整性。原数据未被删除。");
+    }
+    errorMessage += QStringLiteral("\n\n数据库路径：%1").arg(QDir::toNativeSeparators(opened.databaseName()));
+    return false;
 }
 
 WorkSchedule AttendanceStorage::loadWorkSchedule()

@@ -9,6 +9,7 @@
 // Centralizes SQLite access for attendance data.
 class AttendanceStorage {
 public:
+    static bool initialize(QString& errorMessage);
     static WorkSchedule loadWorkSchedule();
     static void saveWorkSchedule(const WorkSchedule& schedule);
 

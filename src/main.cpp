@@ -1,5 +1,6 @@
 #include "AttendanceMainWindow.h"
 #include "AppVersion.h"
+#include "Data/AttendanceStorage.h"
 #include "Utils/SingleInstanceGuard.h"
 
 #include <QApplication>
@@ -55,6 +56,12 @@ int main(int argc, char* argv[])
     }
     if (startResult == SingleInstanceGuard::StartResult::Failed) {
         QMessageBox::warning(nullptr, QStringLiteral("工时簿"), instance.errorString());
+        return 1;
+    }
+
+    QString storageError;
+    if (!AttendanceStorage::initialize(storageError)) {
+        QMessageBox::critical(nullptr, QStringLiteral("考勤数据无法加载"), storageError);
         return 1;
     }
 

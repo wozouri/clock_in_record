@@ -15,7 +15,8 @@ param(
     [string]$WindeployQtPath = "",
     [string]$IsccPath = "",
     [string]$VcpkgBinDir = "",
-    [switch]$SkipInstaller
+    [switch]$SkipInstaller,
+    [switch]$CheckOnly
 )
 
 $ErrorActionPreference = "Stop"
@@ -100,6 +101,30 @@ if ($Version -notmatch '^v\d{4}\.\d{2}\.\d{2}$') {
     throw "版本号必须为 vYYYY.MM.DD，例如 v2026.09.07: $Version"
 }
 
+# 打包前必须执行同一构建目录的旧版数据回归，失败或缺少测试程序都不能发布。
+# 放在创建发布目录、复制文件和修改清单之前，失败时现有发布内容保持不变。
+$compatibilityTest = Join-Path $SourceDir "storage_compatibility_tests.exe"
+if (-not (Test-Path -LiteralPath $compatibilityTest -PathType Leaf)) {
+    throw "缺少数据库兼容性测试程序，请启用 BUILD_TESTING 并构建 storage_compatibility_tests 后再发布。"
+}
+$windeployqt = Resolve-ToolPath $WindeployQtPath "windeployqt.exe" "windeployqt"
+$previousPath = $env:PATH
+try {
+    $env:PATH = (Split-Path -Parent $windeployqt) + ";" + (Resolve-Path -LiteralPath $SourceDir).Path + ";" + $previousPath
+    foreach ($schemaVersion in @(4, 5, 6, 7)) {
+        & $compatibilityTest $schemaVersion
+        if ($LASTEXITCODE -ne 0) {
+            throw "数据库兼容性回归失败（结构版本 $schemaVersion），已停止发布，未修改发布目录和版本清单。"
+        }
+    }
+} finally {
+    $env:PATH = $previousPath
+}
+Write-Output "数据库兼容性回归全部通过。"
+if ($CheckOnly) {
+    return
+}
+
 $packageDir = Join-Path $UpdatesDir "packages"
 $installerDir = Join-Path $UpdatesDir "installers"
 New-Item -ItemType Directory -Force -Path $packageDir | Out-Null
@@ -114,7 +139,6 @@ $installerPath = ""
 $serviceInstallerPath = ""
 try {
     Initialize-VisualStudioRuntime
-    $windeployqt = Resolve-ToolPath $WindeployQtPath "windeployqt.exe" "windeployqt"
 
     Copy-Item -LiteralPath (Join-Path $SourceDir "AttendanceApp.exe") -Destination $clientStaging -Force
     Copy-Item -Path (Join-Path $SourceDir "*.dll") -Destination $clientStaging -Force

@@ -23,3 +23,8 @@ endif()
 add_subdirectory(third_party/ElaWidgetTools)
 add_subdirectory(service)
 add_subdirectory(src)
+
+include(CTest)
+if(BUILD_TESTING)
+    add_subdirectory(tests/storage_compatibility)
+endif()
