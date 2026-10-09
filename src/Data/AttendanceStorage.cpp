@@ -2,6 +2,8 @@
 
 #include <QDebug>
 #include <QDir>
+#include <QFile>
+#include <QTemporaryDir>
 #include <QSettings>
 #include <QSet>
 #include <QSqlDatabase>
@@ -458,4 +460,39 @@ void AttendanceStorage::upsertCheckTimes(const QDate& date, const QString& check
 QString AttendanceStorage::dateKey(const QDate& date)
 {
     return date.toString("yyyy-MM-dd");
+}
+
+QByteArray AttendanceStorage::createBackup(QString& errorMessage)
+{
+    errorMessage.clear();
+    const QSqlDatabase database = storageDatabase();
+    if (!database.isOpen()) {
+        errorMessage = QStringLiteral("无法打开考勤数据库，备份已取消。");
+        return {};
+    }
+    QTemporaryDir temporary;
+    if (!temporary.isValid()) {
+        errorMessage = QStringLiteral("无法创建备份临时目录。");
+        return {};
+    }
+    const QString path = temporary.filePath(QStringLiteral("attendance.db"));
+    QSqlQuery query(database);
+    // SQLite 创建一致快照，包含全部表；不能直接复制可能正在写入的数据库文件。
+    query.prepare(QStringLiteral("VACUUM INTO ?"));
+    query.addBindValue(path);
+    if (!query.exec()) {
+        errorMessage = QStringLiteral("生成数据库备份失败：%1").arg(query.lastError().text());
+        return {};
+    }
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly)) {
+        errorMessage = QStringLiteral("无法读取数据库备份。");
+        return {};
+    }
+    const QByteArray data = file.readAll();
+    if (file.error() != QFileDevice::NoError) {
+        errorMessage = QStringLiteral("读取数据库备份失败。");
+        return {};
+    }
+    return data;
 }

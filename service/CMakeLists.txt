@@ -15,6 +15,8 @@ find_package(Drogon CONFIG REQUIRED)
 
 add_executable(${PROJECT_NAME}
     main.cpp
+    BackupStore.cpp
+    BackupStore.h
     resources.qrc
 )
 

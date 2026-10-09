@@ -1,4 +1,5 @@
 #include <QCoreApplication>
+#include "BackupStore.h"
 #include <QDate>
 #include <QDateTime>
 #include <QDir>
@@ -12,6 +13,7 @@
 
 #include <drogon/drogon.h>
 #include <trantor/utils/Logger.h>
+#include <trantor/net/EventLoop.h>
 
 #include <cstdio>
 #include <mutex>
@@ -24,7 +26,7 @@ namespace {
 
 constexpr wchar_t kDefaultServiceName[] = L"AttendanceUpdateService";
 constexpr wchar_t kServiceDisplayName[] = L"工时簿更新服务";
-constexpr wchar_t kServiceDescription[] = L"为工时簿提供本地更新分发服务。";
+constexpr wchar_t kServiceDescription[] = L"为工时簿提供本地更新分发和数据库备份服务。";
 constexpr int kDailyDownloadLimit = 50;
 
 #ifdef Q_OS_WIN
@@ -61,6 +63,7 @@ struct ServiceConfig {
     QString host;
     quint16 port = 47980;
     QString root;
+    QString backupRoot;
 };
 
 QString resolveUpdateRoot()
@@ -83,6 +86,11 @@ ServiceConfig loadConfig()
     config.port = static_cast<quint16>(
         settings.value(QStringLiteral("service/port"), 47980).toUInt());
     config.root = resolveUpdateRoot();
+    config.backupRoot = settings.value(QStringLiteral("service/backupRoot"),
+        QDir(exeDirPath()).filePath(QStringLiteral("backups"))).toString().trimmed();
+    if (config.backupRoot.isEmpty()) {
+        config.backupRoot = QDir(exeDirPath()).filePath(QStringLiteral("backups"));
+    }
     return config;
 }
 
@@ -166,10 +174,17 @@ public:
         QDir().mkpath(m_config.root);
         QDir().mkpath(QDir(m_config.root).filePath(QStringLiteral("packages")));
         QDir().mkpath(QDir(m_config.root).filePath(QStringLiteral("installers")));
+        if (!QDir().mkpath(QFileInfo(logFilePath()).absolutePath())) {
+            writeLog(QStringLiteral("unable to create service log directory"));
+            return false;
+        }
         m_downloadQuota.setStoragePath(
             QDir(m_config.root).filePath(QStringLiteral("download-quota.ini")));
 
         using namespace drogon;
+        m_backups.setRoot(m_config.backupRoot);
+        m_backups.prune();
+        app().setClientMaxBodySize(BackupStore::maxBackupBytes);
         app().setLogPath(QDir(exeDirPath()).filePath(QStringLiteral("logs")).toStdString());
         app().setLogLevel(trantor::Logger::kInfo);
         app().setThreadNum(1);
@@ -212,8 +227,35 @@ public:
             serveArtifact(request, std::move(callback), QStringLiteral("installers"),
                 QString::fromStdString(name));
         }, {Get});
+        app().registerHandler("/api/backups", [this](const HttpRequestPtr& request,
+            std::function<void(const HttpResponsePtr&)>&& callback) {
+            const QString device = QString::fromStdString(request->getHeader("x-backup-device"));
+            const QString key = QString::fromStdString(request->getHeader("x-backup-key"));
+            const auto body = request->getBody();
+            const BackupResult result = request->method() == Put
+                ? m_backups.upload(device, key, QByteArray(body.data(), int(body.size())))
+                : m_backups.list(device, key);
+            callback(backupResponse(result));
+        }, {Get, Put});
+        app().registerHandler("/api/backups/{1}", [this](const HttpRequestPtr& request,
+            std::function<void(const HttpResponsePtr&)>&& callback, const std::string& date) {
+            const BackupResult result = m_backups.download(
+                QString::fromStdString(request->getHeader("x-backup-device")),
+                QString::fromStdString(request->getHeader("x-backup-key")), QString::fromStdString(date));
+            if (result.status != 200) {
+                callback(backupResponse(result));
+                return;
+            }
+            auto response = HttpResponse::newHttpResponse();
+            response->setContentTypeCode(CT_APPLICATION_OCTET_STREAM);
+            response->setBody(result.data.toStdString());
+            response->addHeader("Content-Disposition", "attachment; filename=attendance-" + date + ".db");
+            response->addHeader("Cache-Control", "no-store");
+            callback(response);
+        }, {Get});
         app().addListener(m_config.host.toStdString(), m_config.port);
         app().registerBeginningAdvice([this] {
+            drogon::app().getLoop()->runEvery(60.0, [this] { m_backups.prune(); });
             writeLog(QStringLiteral("Drogon listener started on http://%1:%2")
                          .arg(m_config.host)
                          .arg(m_config.port));
@@ -232,6 +274,17 @@ public:
     }
 
 private:
+    static drogon::HttpResponsePtr backupResponse(const BackupResult& result)
+    {
+        const QJsonObject body{{QStringLiteral("error"), result.error},
+            {QStringLiteral("backups"), result.entries},
+            {QStringLiteral("date"), QDate::currentDate().toString(Qt::ISODate)}};
+        auto response = textResponse(static_cast<drogon::HttpStatusCode>(result.status),
+            QString::fromUtf8(QJsonDocument(body).toJson(QJsonDocument::Compact)),
+            QStringLiteral("application/json; charset=utf-8"));
+        response->addHeader("Cache-Control", "no-store");
+        return response;
+    }
     static drogon::HttpResponsePtr textResponse(drogon::HttpStatusCode status, const QString& body,
         const QString& contentType)
     {
@@ -329,6 +382,7 @@ private:
 
     ServiceConfig m_config;
     DailyDownloadQuota m_downloadQuota;
+    BackupStore m_backups;
 };
 
 bool configureAndRunConsole()
@@ -525,7 +579,8 @@ int run(int argc, char* argv[])
 #endif
                         "\n配置文件: updateservice.ini（服务程序目录下）\n"
                         "  [service]\n  host=127.0.0.1\n  port=47980\n"
-                        "  root=更新文件根目录（默认 updates）\n");
+                        "  root=更新文件根目录（默认 updates）\n"
+                        "  backupRoot=备份文件根目录（默认 backups）\n");
             return 0;
         }
     }

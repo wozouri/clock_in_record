@@ -3,6 +3,7 @@
 
 #include "Types/AttendanceTypes.h"
 #include <QDate>
+#include <QByteArray>
 #include <QStringList>
 
 // Centralizes SQLite access for attendance data.
@@ -17,6 +18,7 @@ public:
 
     static bool hasArrivalRecord(const QDate& date);
     static QStringList recordedDates();
+    static QByteArray createBackup(QString& errorMessage);
 
     static void upsertCheckTimes(const QDate& date, const QString& checkIn, const QString& checkOut);
 
