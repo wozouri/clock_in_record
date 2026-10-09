@@ -1,10 +1,13 @@
 #include "AttendanceMainWindow.h"
 #include "AppVersion.h"
+#include "Utils/SingleInstanceGuard.h"
 
 #include <QApplication>
 #include <QDateTime>
 #include <QFont>
 #include <QIcon>
+#include <QMessageBox>
+#include <QStandardPaths>
 #include <QTextStream>
 
 #include <ElaApplication.h>
@@ -44,6 +47,17 @@ int main(int argc, char* argv[])
     app.setOrganizationName("MyCompany");
     app.setApplicationVersion(QStringLiteral(ATTENDANCE_APP_VERSION));
 
+    SingleInstanceGuard instance(
+        QStandardPaths::writableLocation(QStandardPaths::AppDataLocation));
+    const auto startResult = instance.start();
+    if (startResult == SingleInstanceGuard::StartResult::ActivatedExisting) {
+        return 0;
+    }
+    if (startResult == SingleInstanceGuard::StartResult::Failed) {
+        QMessageBox::warning(nullptr, QStringLiteral("工时簿"), instance.errorString());
+        return 1;
+    }
+
     eApp->init();
     eTheme->setThemeMode(ElaThemeType::Light);
 
@@ -53,6 +67,28 @@ int main(int argc, char* argv[])
     app.setFont(font);
 
     AttendanceMainWindow window;
+    QObject::connect(&instance, &SingleInstanceGuard::activationRequested, &window, [&window] {
+        if (window.isMinimized()) {
+            window.setWindowState(window.windowState() & ~Qt::WindowMinimized);
+        }
+        window.show();
+        QWidget* target = QApplication::activeModalWidget();
+        if (target == nullptr) {
+            target = &window;
+        }
+        if (target->isMinimized()) {
+            target->setWindowState(target->windowState() & ~Qt::WindowMinimized);
+        }
+        target->raise();
+        target->activateWindow();
+#ifdef Q_OS_WIN
+        const HWND handle = reinterpret_cast<HWND>(target->winId());
+        if (!SetForegroundWindow(handle)) {
+            FLASHWINFO flash = {sizeof(FLASHWINFO), handle, FLASHW_TRAY, 3, 0};
+            FlashWindowEx(&flash);
+        }
+#endif
+    });
     window.show();
 
     return app.exec();
