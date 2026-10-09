@@ -18,6 +18,8 @@ public:
     explicit ElaNavigationBar(QWidget* parent = nullptr);
     ~ElaNavigationBar() override;
     void setUserInfoCardVisible(bool isVisible);
+    void setNavigationSearchVisible(bool isVisible);
+    bool getNavigationSearchVisible() const;
     void setUserInfoCardPixmap(QPixmap pix);
     void setUserInfoCardTitle(QString title);
     void setUserInfoCardSubTitle(QString subTitle);

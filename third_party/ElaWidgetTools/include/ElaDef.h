@@ -3,7 +3,7 @@
 #include <QObject>
 
 #include "ElaProperty.h"
-#define ElaDefVersion "2.0.1"
+inline constexpr char ElaDefVersion[] = "2.0.1";
 
 #if QT_VERSION >= QT_VERSION_CHECK(5, 14, 0)
 #define Q_BEGIN_ENUM_CREATE(CLASS) \
@@ -256,6 +256,17 @@ enum MessageMode
 };
 Q_ENUM_CREATE(MessageMode)
 Q_END_ENUM_CREATE(ElaMessageBarType)
+
+Q_BEGIN_ENUM_CREATE(ElaInfoBarType)
+enum InfoBarSeverity
+{
+    Informational = 0x0000,
+    Success = 0x0001,
+    Warning = 0x0002,
+    Error = 0x0003,
+};
+Q_ENUM_CREATE(InfoBarSeverity)
+Q_END_ENUM_CREATE(ElaInfoBarType)
 
 Q_BEGIN_ENUM_CREATE(ElaProgressRingType)
 enum ValueDisplayMode

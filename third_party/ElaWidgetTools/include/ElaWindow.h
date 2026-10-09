@@ -69,6 +69,10 @@ public:
     void setNavigationNodeTitle(QString nodeKey, QString nodeTitle);
     QString getNavigationNodeTitle(QString nodeKey) const;
 
+    void setNavigationSearchVisible(bool isVisible);
+    void setNavigationMinimalWidthThreshold(int width);
+    void setNavigationMaximalWidthThreshold(int width);
+
     void navigation(QString pageKey);
     int getCurrentNavigationIndex() const;
     QString getCurrentNavigationPageKey() const;
