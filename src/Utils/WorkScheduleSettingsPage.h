@@ -18,11 +18,16 @@ public:
     explicit WorkScheduleSettingsPage(QWidget* parent = nullptr);
     void setWorkSchedule(const WorkSchedule& schedule);
     void setUpdateServiceEndpoint(const QString& host, quint16 port);
+    void setBackupEnabled(bool enabled);
+    void setBackupStatus(const QString& text);
 
 signals:
     void workScheduleSaved(const WorkSchedule& schedule);
     void updateServiceEndpointSaved(const QString& host, quint16 port);
     void aboutRequested();
+    void backupEnabledChanged(bool enabled);
+    void backupNowRequested();
+    void backupDownloadRequested();
 
 private slots:
     void updateLunchBreakState(bool enabled);
@@ -56,6 +61,9 @@ private:
     quint16 m_savedUpdateServerPort = 47980;
     ElaPushButton* m_saveButton = nullptr;
     QLabel* m_pendingChangesLabel = nullptr;
+    ElaToggleSwitch* m_backupToggle = nullptr;
+    ElaPushButton* m_backupNowButton = nullptr;
+    QLabel* m_backupStatusLabel = nullptr;
     QGraphicsDropShadowEffect* m_lunchBreakChangeEffect = nullptr;
     QGraphicsDropShadowEffect* m_dinnerBreakChangeEffect = nullptr;
     QGraphicsDropShadowEffect* m_mealAllowanceMarkerChangeEffect = nullptr;

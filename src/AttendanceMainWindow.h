@@ -26,6 +26,7 @@ class QSpacerItem;
 class QStackedWidget;
 class UpdateChecker;
 class AttendanceUpdateBar;
+class BackupClient;
 
 // 主窗口
 class AttendanceMainWindow : public ElaWindow {
@@ -81,6 +82,7 @@ private:
     };
 
     void setupUI();
+    void updateNavigationBarAppearance();
     void refreshMonthlyView();
     void updateBatchActionState();
     void updateContextTips(const QList<QDate>& dates);
@@ -104,7 +106,9 @@ private:
     void processExportFile(const QString& filePath);
 
     void setupUpdateUi();
+    void setupBackupUi();
     void setupSettingsPageTransition();
+    void updateSettingsOverlayGeometry();
     void onCentralPageChanged(int index);
     void startSettingsPageTransition(bool entering, QWidget* backdropPage);
     void cancelSettingsPageTransition();
@@ -142,6 +146,7 @@ private:
     QList<AttendanceHistoryEntry> m_redoStack;
 
     UpdateChecker* m_updateChecker = nullptr;
+    BackupClient* m_backupClient = nullptr;
     QWidget* m_updateToolsHost = nullptr;
     ElaToolButton* m_updateCheckButton = nullptr;
     ElaIconButton* m_updateIndicatorButton = nullptr;

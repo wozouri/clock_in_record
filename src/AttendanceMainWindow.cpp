@@ -1,5 +1,10 @@
 ﻿#include "AttendanceMainWindow.h"
 #include "Utils/CustomCalendarWidget.h"
+#include "Backup/BackupClient.h"
+#include <QInputDialog>
+#include <QJsonObject>
+#include <QStandardPaths>
+#include <QDir>
 #include "Utils/TimeSettingDialog.h"
 #include "Utils/WorkScheduleSettingsPage.h"
 #include "Data/AttendanceJsonService.h"
@@ -331,37 +336,65 @@ private:
 AttendanceMainWindow::AttendanceMainWindow(QWidget* parent) : ElaWindow(parent) {
     setWindowTitle(QStringLiteral("工时簿 %1").arg(QCoreApplication::applicationVersion()));
     setMinimumSize(1040, 680);
-    resize(1180, 760);
+    resize(1182, 800);
 
     setAppBarHeight(48);
     setIsNavigationBarEnable(true);
-    setNavigationBarDisplayMode(ElaNavigationType::Maximal);
     setNavigationBarWidth(260);
     setIsAllowPageOpenInNewWindow(false);
     setIsCentralStackedWidgetTransparent(true);
     setUserInfoCardVisible(false);
+    setNavigationSearchVisible(false);
+    if (auto* navigationBar = findChild<ElaNavigationBar*>()) {
+        // 启动时直接显示图标栏，避免先展开再播放收起动画。
+        navigationBar->setDisplayMode(ElaNavigationType::Compact, false);
+    }
+    setNavigationBarDisplayMode(ElaNavigationType::Compact);
     setWindowButtonFlags(ElaAppBarType::RouteBackButtonHint
         | ElaAppBarType::MinimizeButtonHint
         | ElaAppBarType::CloseButtonHint);
 
     setupUI();
 
-    if (auto* navigationBar = findChild<ElaNavigationBar*>()) {
-        navigationBar->setIsTransparent(true);
-        for (auto* child : navigationBar->findChildren<QWidget*>()) {
-            const QString className = QString::fromLatin1(child->metaObject()->className());
-            if (className == QStringLiteral("ElaSuggestBox")
-                || className == QStringLiteral("ElaToolButton")) {
-                child->hide();
-            }
-        }
-    }
+    updateNavigationBarAppearance();
 
     setupUpdateUi();
+    setupBackupUi();
     setupSettingsPageTransition();
 
     // ElaWindow completes its internal layout during setupUI; apply the usable size floor afterwards.
     setMinimumSize(kMinimumWindowWidth, kMinimumWindowHeight);
+}
+
+void AttendanceMainWindow::updateNavigationBarAppearance()
+{
+    if (auto* navigationBar = findChild<ElaNavigationBar*>()) {
+        navigationBar->setIsTransparent(true);
+        // 固定图标侧栏，不提供展开入口。
+        const auto buttons = navigationBar->findChildren<ElaToolButton*>(
+            QString(), Qt::FindDirectChildrenOnly);
+        for (auto* button : buttons) {
+            button->setEnabled(false);
+            button->hide();
+        }
+        // 用户卡片、搜索和展开按钮均隐藏，清掉顶部布局留下的间距。
+        auto* mainLayout = navigationBar->layout();
+        for (auto* layout : navigationBar->findChildren<QLayout*>()) {
+            if (layout != mainLayout) {
+                layout->setContentsMargins(0, 0, 0, 0);
+                layout->setSpacing(0);
+            }
+        }
+        if (mainLayout) {
+            mainLayout->setContentsMargins(0, 4, 5, 0);
+            for (int i = 0; i < mainLayout->count(); ++i) {
+                if (auto* spacer = mainLayout->itemAt(i)->spacerItem()) {
+                    spacer->changeSize(0, 0, QSizePolicy::Fixed, QSizePolicy::Fixed);
+                }
+            }
+            mainLayout->invalidate();
+        }
+    }
 }
 
 void AttendanceMainWindow::mousePressEvent(QMouseEvent* event) {
@@ -395,7 +428,10 @@ void AttendanceMainWindow::moveEvent(QMoveEvent* event) {
 void AttendanceMainWindow::resizeEvent(QResizeEvent* event) {
     ElaWindow::resizeEvent(event);
     scheduleStatsLabelPresentationUpdate();
+    updateSettingsOverlayGeometry();
+}
 
+void AttendanceMainWindow::updateSettingsOverlayGeometry() {
     if (!m_centralStack || !m_settingsOverlay) {
         return;
     }
@@ -425,6 +461,10 @@ bool AttendanceMainWindow::nativeEvent(const QByteArray& eventType, void* messag
 #endif
 
 bool AttendanceMainWindow::eventFilter(QObject* watched, QEvent* event) {
+    if (watched == m_centralStack
+        && (event->type() == QEvent::Resize || event->type() == QEvent::Move)) {
+        updateSettingsOverlayGeometry();
+    }
     if (watched == m_statsLabel) {
         if (event->type() == QEvent::Resize) {
             scheduleStatsLabelPresentationUpdate();
@@ -793,16 +833,15 @@ void AttendanceMainWindow::setupUI() {
             if (m_updateChecker) {
                 m_updateChecker->setServiceBaseUrl(QUrl(UpdateChecker::updateServiceBaseUrl()));
             }
+            if (m_backupClient) {
+                m_backupClient->setEndpoint(QUrl(UpdateChecker::updateServiceBaseUrl()));
+            }
             showStatusMessage(QStringLiteral("更新服务器已更新"));
         });
     connect(m_workScheduleSettingsPage, &WorkScheduleSettingsPage::aboutRequested,
         this, &AttendanceMainWindow::showAboutDialog);
 
-    QString attendanceNavigationKey;
-    addExpanderNode(QStringLiteral("考勤管理"), attendanceNavigationKey, ElaIconType::Calendar);
-    addPageNode(QStringLiteral("日历记录"), calendarPage, attendanceNavigationKey,
-        ElaIconType::CalendarDays);
-    expandNavigationNode(attendanceNavigationKey);
+    addPageNode(QStringLiteral("日历记录"), calendarPage, ElaIconType::CalendarDays);
     QString settingsPageKey;
     m_settingsRoutePage = new QWidget();
     m_settingsRoutePage->setObjectName(QStringLiteral("workScheduleSettingsRoutePage"));
@@ -1387,6 +1426,56 @@ void AttendanceMainWindow::updateStatsLabelPresentation()
     }
 }
 
+void AttendanceMainWindow::setupBackupUi()
+{
+    m_backupClient = new BackupClient(
+        QStandardPaths::writableLocation(QStandardPaths::AppDataLocation), this);
+    m_workScheduleSettingsPage->setBackupEnabled(m_backupClient->isEnabled());
+    m_workScheduleSettingsPage->setBackupStatus(m_backupClient->statusText());
+    connect(m_workScheduleSettingsPage, &WorkScheduleSettingsPage::backupEnabledChanged,
+        m_backupClient, &BackupClient::setEnabled);
+    connect(m_backupClient, &BackupClient::enabledChanged,
+        m_workScheduleSettingsPage, &WorkScheduleSettingsPage::setBackupEnabled);
+    connect(m_backupClient, &BackupClient::statusChanged,
+        m_workScheduleSettingsPage, &WorkScheduleSettingsPage::setBackupStatus);
+    connect(m_workScheduleSettingsPage, &WorkScheduleSettingsPage::backupNowRequested,
+        m_backupClient, &BackupClient::backupNow);
+    connect(m_workScheduleSettingsPage, &WorkScheduleSettingsPage::backupDownloadRequested,
+        m_backupClient, &BackupClient::listBackups);
+    connect(m_backupClient, &BackupClient::operationFailed, this, [this](const QString& message) {
+        QMessageBox::warning(this, QStringLiteral("本机备份"), message);
+    });
+    connect(m_backupClient, &BackupClient::backupDownloaded, this, [this](const QString&) {
+        showStatusMessage(QStringLiteral("备份已下载保存"));
+    });
+    connect(m_backupClient, &BackupClient::backupsListed, this, [this](const QJsonArray& entries) {
+        QStringList days;
+        for (const QJsonValue& value : entries) {
+            const QString day = value.toObject().value(QStringLiteral("date")).toString();
+            if (QDate::fromString(day, Qt::ISODate).isValid()) {
+                days.append(day);
+            }
+        }
+        if (days.isEmpty()) {
+            QMessageBox::information(this, QStringLiteral("本机备份"), QStringLiteral("最近三天暂无本机备份。"));
+            return;
+        }
+        bool accepted = false;
+        const QString day = QInputDialog::getItem(this, QStringLiteral("下载本机备份"),
+            QStringLiteral("选择备份日期（包含全部考勤数据）："), days, 0, false, &accepted);
+        if (!accepted) {
+            return;
+        }
+        const QString destination = QFileDialog::getSaveFileName(this, QStringLiteral("保存数据库备份"),
+            QDir(QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation))
+                .filePath(QStringLiteral("attendance-%1.db").arg(day)),
+            QStringLiteral("SQLite 数据库 (*.db)"));
+        if (!destination.isEmpty()) {
+            m_backupClient->downloadBackup(day, destination);
+        }
+    });
+}
+
 void AttendanceMainWindow::setupUpdateUi() {
     m_updateChecker = new UpdateChecker(this);
 
@@ -1491,6 +1580,7 @@ void AttendanceMainWindow::setupSettingsPageTransition() {
         this, &AttendanceMainWindow::finishSettingsPageTransition);
     connect(m_centralStack, &QStackedWidget::currentChanged,
         this, &AttendanceMainWindow::onCentralPageChanged);
+    m_centralStack->installEventFilter(this);
 }
 
 void AttendanceMainWindow::onCentralPageChanged(int index) {
