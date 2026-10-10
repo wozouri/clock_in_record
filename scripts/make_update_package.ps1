@@ -132,8 +132,13 @@ try {
         try {
             $testArguments = @("-o", ('"{0}",txt' -f $report))
             if ($testName -eq "legacy_ui_tests") { $testArguments += @("-platform", "windows") }
-            $process = Start-Process -FilePath (Join-Path $SourceDir ($testName + ".exe")) `
-                -ArgumentList $testArguments -WindowStyle Hidden -PassThru
+            # CreateNoWindow 仅隐藏测试控制台，不设置影响 Qt 首次显示/最大化的 SW_HIDE。
+            $process = New-Object System.Diagnostics.Process
+            $process.StartInfo.FileName = Join-Path $SourceDir ($testName + ".exe")
+            $process.StartInfo.Arguments = $testArguments -join " "
+            $process.StartInfo.UseShellExecute = $false
+            $process.StartInfo.CreateNoWindow = $true
+            [void]$process.Start()
             if (-not $process.WaitForExit(90000)) {
                 $process.Kill()
                 $process.WaitForExit()
