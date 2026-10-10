@@ -7,6 +7,9 @@
 - 日历视图记录每日考勤
 - 独立配置上下班、午休和晚餐休息制度
 - 自动计算迟到/早退/加班和月度汇总
+- 月度提示显示距离日均加班 2.0、2.5、3.0 小时的累计差值
+- 每日独立作息、非工作日的标准时段加班开关和日历作息标记
+- 删除和导入支持撤销/重做，导入前预览覆盖范围及工作制度影响
 - 支持 JSON 导入与备份导出
 - 本地存储，不依赖服务端
 - 单实例运行，重复启动会唤起已有窗口
@@ -72,12 +75,12 @@ cmake --build out/build/x64-RelWithDebInfo --config RelWithDebInfo
 - 使用 Inno Setup 分别生成客户端与更新服务 Windows 安装程序；
 - 写入更新服务读取的 `manifest.json`。
 
-发布脚本会先强制运行结构版本 4、5、6 的旧版数据库回归，以及未知版本 7 的错误提示测试。缺少测试程序或任何测试失败都会停止发布，且不修改发布目录与版本清单。根项目默认启用 `BUILD_TESTING`，完整构建会同时生成 `storage_compatibility_tests.exe`；只构建客户端目标时，还需要构建该测试目标。传入 `-CheckOnly` 可仅检查发布条件，不生成安装包。
+发布脚本先强制运行结构版本 4、5、6 的旧版数据库回归、未知版本 7 的错误提示测试，以及月度目标、旧版界面功能和完整备份回归。缺少测试程序、超时或任何测试失败都会停止发布，且不修改发布目录与版本清单。根项目默认启用 `BUILD_TESTING`，完整构建会生成 `storage_compatibility_tests.exe`、`stats_tests.exe`、`legacy_ui_tests.exe` 和 `backup_tests.exe`。传入 `-CheckOnly` 可仅检查发布条件，不生成安装包。界面回归在 Windows Qt 平台运行，备份回归使用独立临时数据库和隔离服务。
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\make_update_package.ps1 `
   -SourceDir out\build\vs2022-RelWithDebInfo\RelWithDebInfo `
-  -Version v2026.10.09 `
+  -Version v2026.10.10 `
   -UpdatesDir D:\AttendanceUpdates
 ```
 

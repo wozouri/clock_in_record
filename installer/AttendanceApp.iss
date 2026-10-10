@@ -1,6 +1,6 @@
 ; 工时簿 Windows 安装程序。发布脚本通过 ISCC 的 /D 参数注入构建产物和版本号。
 #ifndef AppVersion
-  #define AppVersion "v2026.10.09"
+  #define AppVersion "v2026.10.10"
 #endif
 #ifndef SourceDir
   #define SourceDir "..\dist\AttendanceApp"

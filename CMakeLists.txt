@@ -1,5 +1,5 @@
 ﻿cmake_minimum_required(VERSION 3.16)
-project(AttendanceApp VERSION 2026.10.09 LANGUAGES CXX)
+project(AttendanceApp VERSION 2026.10.10 LANGUAGES CXX)
 
 # 设置C++标准
 set(CMAKE_CXX_STANDARD 17)

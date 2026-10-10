@@ -20,6 +20,8 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+$SourceDir = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($SourceDir)
+$UpdatesDir = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($UpdatesDir)
 
 function Resolve-ToolPath {
     param(
@@ -107,8 +109,15 @@ $compatibilityTest = Join-Path $SourceDir "storage_compatibility_tests.exe"
 if (-not (Test-Path -LiteralPath $compatibilityTest -PathType Leaf)) {
     throw "缺少数据库兼容性测试程序，请启用 BUILD_TESTING 并构建 storage_compatibility_tests 后再发布。"
 }
+$featureTests = @("stats_tests", "legacy_ui_tests", "backup_tests")
+foreach ($testName in $featureTests) {
+    if (-not (Test-Path -LiteralPath (Join-Path $SourceDir ($testName + ".exe")) -PathType Leaf)) {
+        throw "缺少功能回归程序 $testName，请完整构建测试目标后再发布。"
+    }
+}
 $windeployqt = Resolve-ToolPath $WindeployQtPath "windeployqt.exe" "windeployqt"
 $previousPath = $env:PATH
+$previousBackupService = $env:ATTENDANCE_BACKUP_TEST_SERVICE
 try {
     $env:PATH = (Split-Path -Parent $windeployqt) + ";" + (Resolve-Path -LiteralPath $SourceDir).Path + ";" + $previousPath
     foreach ($schemaVersion in @(4, 5, 6, 7)) {
@@ -117,10 +126,30 @@ try {
             throw "数据库兼容性回归失败（结构版本 $schemaVersion），已停止发布，未修改发布目录和版本清单。"
         }
     }
+    $env:ATTENDANCE_BACKUP_TEST_SERVICE = (Resolve-Path -LiteralPath (Join-Path $SourceDir "AttendanceUpdateService.exe")).Path
+    foreach ($testName in $featureTests) {
+        $report = Join-Path ([System.IO.Path]::GetTempPath()) ($testName + "-" + [guid]::NewGuid().ToString("N") + ".txt")
+        try {
+            $testArguments = @("-o", ('"{0}",txt' -f $report))
+            if ($testName -eq "legacy_ui_tests") { $testArguments += @("-platform", "windows") }
+            $process = Start-Process -FilePath (Join-Path $SourceDir ($testName + ".exe")) `
+                -ArgumentList $testArguments -WindowStyle Hidden -PassThru
+            if (-not $process.WaitForExit(90000)) {
+                $process.Kill()
+                $process.WaitForExit()
+                throw "功能回归 $testName 超时，已停止发布。"
+            }
+            if (Test-Path -LiteralPath $report) { Get-Content -LiteralPath $report -Encoding UTF8 | Write-Output }
+            if ($process.ExitCode -ne 0) { throw "功能回归 $testName 失败，已停止发布。" }
+        } finally {
+            if (Test-Path -LiteralPath $report) { Remove-Item -LiteralPath $report -Force }
+        }
+    }
 } finally {
     $env:PATH = $previousPath
+    $env:ATTENDANCE_BACKUP_TEST_SERVICE = $previousBackupService
 }
-Write-Output "数据库兼容性回归全部通过。"
+Write-Output "数据库兼容、月度目标、旧版界面功能与备份回归全部通过。"
 if ($CheckOnly) {
     return
 }
@@ -141,7 +170,7 @@ try {
     Initialize-VisualStudioRuntime
 
     Copy-Item -LiteralPath (Join-Path $SourceDir "AttendanceApp.exe") -Destination $clientStaging -Force
-    Copy-Item -Path (Join-Path $SourceDir "*.dll") -Destination $clientStaging -Force
+    Copy-Item -LiteralPath (Join-Path $SourceDir "ElaWidgetTools.dll") -Destination $clientStaging -Force
     & $windeployqt --release --compiler-runtime --no-translations --dir $clientStaging `
         (Join-Path $clientStaging "AttendanceApp.exe")
     if ($LASTEXITCODE -ne 0) {
@@ -152,8 +181,13 @@ try {
     $vcpkgRuntimeDir = Resolve-VcpkgRuntimeDir $VcpkgBinDir
     $serviceRuntimeDlls = @(
         "drogon.dll", "trantor.dll", "jsoncpp.dll", "cares.dll", "brotlicommon.dll",
-        "brotlidec.dll", "brotlienc.dll", "zlib1.dll", "libcrypto-3-x64.dll", "libssl-3-x64.dll"
+        "brotlidec.dll", "brotlienc.dll", "libcrypto-3-x64.dll", "libssl-3-x64.dll"
     )
+    $zlibDll = @("z.dll", "zlib1.dll") | Where-Object {
+        Test-Path -LiteralPath (Join-Path $vcpkgRuntimeDir $_) -PathType Leaf
+    } | Select-Object -First 1
+    if (-not $zlibDll) { throw "缺少服务端 zlib 运行时。" }
+    $serviceRuntimeDlls += $zlibDll
     foreach ($runtimeDll in $serviceRuntimeDlls) {
         $runtimePath = Join-Path $vcpkgRuntimeDir $runtimeDll
         if (-not (Test-Path -LiteralPath $runtimePath -PathType Leaf)) {
@@ -178,6 +212,16 @@ try {
     Compress-Archive -Path $updateItems.FullName -DestinationPath $zipPath -CompressionLevel Optimal
 
     if (-not $SkipInstaller) {
+        foreach ($staging in @($clientStaging, $serviceStaging)) {
+            if (-not (Test-Path -LiteralPath (Join-Path $staging "vc_redist.x64.exe"))) {
+                $redistRoot = $env:VCToolsRedistDir
+                if ([string]::IsNullOrWhiteSpace($redistRoot)) { $redistRoot = Join-Path $env:VCINSTALLDIR "Redist\MSVC" }
+                $redist = Get-ChildItem -LiteralPath $redistRoot -Filter "vc_redist.x64.exe" -Recurse |
+                    Select-Object -First 1
+                if (-not $redist) { throw "缺少 VC 运行库安装程序。" }
+                Copy-Item -LiteralPath $redist.FullName -Destination $staging
+            }
+        }
         $iscc = Resolve-ToolPath $IsccPath "ISCC.exe" "Inno Setup Compiler (ISCC.exe)"
         $installerScript = Join-Path $PSScriptRoot "..\installer\AttendanceApp.iss"
         & $iscc "/DAppVersion=$Version" "/DSourceDir=$clientStaging" "/DOutputDir=$installerDir" $installerScript
@@ -201,8 +245,14 @@ try {
     }
 }
 finally {
-    Remove-Item -LiteralPath $clientStaging -Recurse -Force -ErrorAction SilentlyContinue
-    Remove-Item -LiteralPath $serviceStaging -Recurse -Force -ErrorAction SilentlyContinue
+    $temporaryRoot = [System.IO.Path]::GetFullPath([System.IO.Path]::GetTempPath()).TrimEnd('\') + '\'
+    foreach ($staging in @($clientStaging, $serviceStaging)) {
+        $resolvedStaging = [System.IO.Path]::GetFullPath($staging)
+        if (-not $resolvedStaging.StartsWith($temporaryRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+            throw "拒绝清理临时目录以外的路径: $resolvedStaging"
+        }
+        Remove-Item -LiteralPath $resolvedStaging -Recurse -Force -ErrorAction SilentlyContinue
+    }
 }
 
 $hash = (Get-FileHash -LiteralPath $zipPath -Algorithm SHA256).Hash.ToLowerInvariant()
