@@ -205,6 +205,7 @@ private slots:
             QTest::qWait(200);
             QTRY_COMPARE(dialog.screen(),screen);
             QCOMPARE(dialog.width(),520);
+            QTRY_COMPARE(dialog.size(),dialog.contentGeometry(available).size());
             QVERIFY(available.adjusted(12,12,-12,-12).contains(dialog.geometry()));
         }
         dialog.close();

@@ -148,6 +148,11 @@ bool WindowScreenTracker::eventFilter(QObject* watched, QEvent* event)
     }
     if (watched == m_window && event->type() == QEvent::Resize) {
         m_sizeTimer.start(0);
+        // Dialog geometry can receive a late native resize after screenChanged.
+        // Recompute content height once resizing/animation has settled, even on
+        // a large screen where the oversized dialog still fits the work area.
+        if (!m_preserveNormalSize && m_window->isVisible() && m_window->windowType() == Qt::Dialog)
+            scheduleRefresh();
         if (!m_window->isMaximized() && !m_window->isFullScreen()) {
             if (auto* screen = ScreenLayout::screenForWidget(m_window)) {
                 const int margin = m_preserveNormalSize ? 16 : 24;
