@@ -1,5 +1,6 @@
 ﻿#include "AttendanceMainWindow.h"
 #include "Utils/CustomCalendarWidget.h"
+#include "Utils/CalendarWorkspace.h"
 #include "Backup/BackupClient.h"
 #include <QInputDialog>
 #include <QJsonObject>
@@ -8,6 +9,7 @@
 #include "Utils/TimeSettingDialog.h"
 #include "Utils/WorkScheduleSettingsPage.h"
 #include "Data/AttendanceJsonService.h"
+#include "Data/WorkScheduleCodec.h"
 #include "Data/AttendanceStatsService.h"
 #include "Data/AttendanceStorage.h"
 #include <QVBoxLayout>
@@ -34,6 +36,7 @@
 #include <QStackedWidget>
 #include <QVariantAnimation>
 #include <QScreen>
+#include "Utils/ScreenLayout.h"
 #include <ElaToolButton.h>
 #include <ElaIcon.h>
 #include <ElaAppBar.h>
@@ -59,7 +62,10 @@ bool recordsEqual(const AttendanceRecord& lhs, const AttendanceRecord& rhs) {
     return lhs.needAverageCal == rhs.needAverageCal
         && lhs.arrivalTime == rhs.arrivalTime
         && lhs.departureTime == rhs.departureTime
-        && lhs.note == rhs.note;
+        && lhs.note == rhs.note
+        && lhs.excludeStandardOvertime == rhs.excludeStandardOvertime
+        && lhs.hasCustomSchedule == rhs.hasCustomSchedule
+        && (!lhs.hasCustomSchedule || workSchedulesEqual(lhs.customSchedule, rhs.customSchedule));
 }
 
 QString recordSummaryHtml(const AttendanceRecord& record) {
@@ -364,6 +370,38 @@ AttendanceMainWindow::AttendanceMainWindow(QWidget* parent) : ElaWindow(parent) 
 
     // ElaWindow completes its internal layout during setupUI; apply the usable size floor afterwards.
     setMinimumSize(kMinimumWindowWidth, kMinimumWindowHeight);
+    resize(1182, 800);
+    new WindowScreenTracker(this, [this] { updateScreenLayout(); }, true);
+}
+
+void AttendanceMainWindow::updateScreenLayout()
+{
+    auto* screen = ScreenLayout::screenForWidget(this);
+    if (!screen) return;
+    const QRect available = screen->availableGeometry();
+    // Leave room for the native resize frame and fractional-DPI rounding when
+    // fitting a normal window. Maximized client geometry uses the full work area.
+    const QRect normalBounds = available.adjusted(8,8,-8,-8);
+    // Retain the normal size floor on large monitors; permit a smaller layout
+    // when the target monitor's logical work area is reduced by DPI scaling.
+    if (auto* page = findChild<QWidget*>(QStringLiteral("attendanceCalendarPage"))) {
+        page->setMinimumHeight(qMin(600, qMax(0, normalBounds.height() - 48)));
+    }
+    if (m_calendar) {
+        m_calendar->setMinimumHeight(qMin(440, qMax(180, normalBounds.height() - 48 - 58 - 24)));
+        if (auto* workspace = m_calendar->parentWidget())
+            workspace->setMinimumHeight(m_calendar->minimumHeight() + 24);
+        m_calendar->update();
+    }
+    setMinimumSize(qMin(kMinimumWindowWidth, normalBounds.width()),
+        qMin(kMinimumWindowHeight, normalBounds.height()));
+    if (!isMaximized() && !isFullScreen()) {
+        const QRect target = ScreenLayout::fittedGeometry(geometry(), normalBounds);
+        if (geometry() != target) setGeometry(target);
+    }
+    scheduleStatsLabelPresentationUpdate();
+    updateSettingsOverlayGeometry();
+    refreshContextTipPositions();
 }
 
 void AttendanceMainWindow::updateNavigationBarAppearance()
@@ -449,12 +487,43 @@ void AttendanceMainWindow::updateSettingsOverlayGeometry() {
 
 #ifdef Q_OS_WIN
 bool AttendanceMainWindow::nativeEvent(const QByteArray& eventType, void* message, long* result) {
-    const bool handled = ElaWindow::nativeEvent(eventType, message, result);
     auto* nativeMessage = static_cast<MSG*>(message);
-    if (nativeMessage->message == WM_GETMINMAXINFO) {
+    const bool handled = ElaWindow::nativeEvent(eventType, message, result);
+    if (nativeMessage && nativeMessage->message == WM_NCCALCSIZE && nativeMessage->wParam
+        && nativeMessage->lParam && IsZoomed(nativeMessage->hwnd) && !isFullScreen()) {
+        MONITORINFO info{};
+        info.cbSize = sizeof(info);
+        const auto monitor = MonitorFromWindow(nativeMessage->hwnd, MONITOR_DEFAULTTONEAREST);
+        if (monitor && GetMonitorInfoW(monitor, &info)) {
+            // Ela's scaled frame calculation can shift the client area on a
+            // monitor with different DPI. SessionHub uses the same native fix.
+            auto* parameters = reinterpret_cast<NCCALCSIZE_PARAMS*>(nativeMessage->lParam);
+            parameters->rgrc[0] = info.rcWork;
+            if (result) *result = WVR_REDRAW;
+            return true;
+        }
+    }
+    if (nativeMessage && nativeMessage->message == WM_GETMINMAXINFO && nativeMessage->lParam) {
         auto* minMaxInfo = reinterpret_cast<MINMAXINFO*>(nativeMessage->lParam);
-        minMaxInfo->ptMinTrackSize.x = kMinimumWindowWidth;
-        minMaxInfo->ptMinTrackSize.y = kMinimumWindowHeight;
+        minMaxInfo->ptMinTrackSize.x = qRound(minimumWidth() * devicePixelRatioF());
+        minMaxInfo->ptMinTrackSize.y = qRound(minimumHeight() * devicePixelRatioF());
+        // Win32 expects physical pixels relative to the target monitor, rather
+        // than Qt's scaled virtual desktop coordinates (which may be negative).
+        MONITORINFO monitorInfo{};
+        monitorInfo.cbSize = sizeof(monitorInfo);
+        const auto monitor = MonitorFromWindow(nativeMessage->hwnd, MONITOR_DEFAULTTONEAREST);
+        if (monitor && GetMonitorInfoW(monitor, &monitorInfo)) {
+            const auto& work = monitorInfo.rcWork;
+            const auto& full = monitorInfo.rcMonitor;
+            minMaxInfo->ptMaxPosition.x = work.left - full.left;
+            minMaxInfo->ptMaxPosition.y = work.top - full.top;
+            minMaxInfo->ptMaxSize.x = work.right - work.left;
+            minMaxInfo->ptMaxSize.y = work.bottom - work.top;
+            minMaxInfo->ptMinTrackSize.x = qMin(minMaxInfo->ptMinTrackSize.x, minMaxInfo->ptMaxSize.x);
+            minMaxInfo->ptMinTrackSize.y = qMin(minMaxInfo->ptMinTrackSize.y, minMaxInfo->ptMaxSize.y);
+        }
+        if (result) *result = 0;
+        return true;
     }
     return handled;
 }
@@ -492,6 +561,10 @@ void AttendanceMainWindow::onDateDoubleClicked(const QDate& date) {
     const AttendanceRecordState beforeState = captureRecordState(date);
     TimeSettingDialog dialog(date, AttendanceStorage::loadWorkSchedule(), this);
     if (dialog.exec() == QDialog::Accepted) {
+        if (dialog.isDeleteRequested()) {
+            deleteAttendanceRecords({date});
+            return;
+        }
         AttendanceRecordState afterState;
         afterState.exists = true;
         afterState.record = dialog.getRecord();
@@ -565,12 +638,45 @@ void AttendanceMainWindow::onWorkScheduleChanged(const WorkSchedule& schedule)
 
 
 void AttendanceMainWindow::processImportFile(const QString& filePath) {
+    const auto preview = AttendanceJsonService::previewImport(filePath);
+    if (!preview.success) {
+        QMessageBox::warning(this, QStringLiteral("导入失败"), preview.errorMessage);
+        return;
+    }
+    if (preview.dates.isEmpty()) {
+        showStatusMessage(QStringLiteral("文件中没有可导入的考勤记录"));
+        return;
+    }
+    auto importDates = preview.dates;
+    std::sort(importDates.begin(), importDates.end());
+    QString prompt = QStringLiteral("共 %1 条记录（%2 ~ %3）\n")
+        .arg(importDates.size()).arg(importDates.first().toString("yyyy-MM-dd"))
+        .arg(importDates.last().toString("yyyy-MM-dd"));
+    if (preview.overwrittenCount > 0) prompt += QStringLiteral("其中 %1 个日期已有记录，导入后将被覆盖。\n").arg(preview.overwrittenCount);
+    if (preview.hasWorkSchedule) prompt += QStringLiteral("文件包含工作制度设置，导入后将更新当前制度。\n");
+    prompt += QStringLiteral("\n是否继续导入？");
+    if (QMessageBox::question(this, QStringLiteral("导入考勤数据"), prompt,
+        QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes) return;
+    QMap<QDate, AttendanceRecordState> before;
+    for (const QDate& date : preview.dates) before.insert(date, captureRecordState(date));
+    const WorkSchedule beforeSchedule = AttendanceStorage::loadWorkSchedule();
     const AttendanceImportResult result = AttendanceJsonService::importFromLarkJson(filePath);
     if (!result.success) {
         QMessageBox::warning(this, "导入失败", result.errorMessage);
         return;
     }
 
+    QList<AttendanceChange> changes;
+    for (const QDate& date : preview.dates) {
+        const auto after = captureRecordState(date);
+        if (before[date].exists != after.exists || !recordsEqual(before[date].record, after.record))
+            changes.append(AttendanceChange{date, before[date], after});
+    }
+    const WorkSchedule afterSchedule = AttendanceStorage::loadWorkSchedule();
+    const bool scheduleChanged = !workSchedulesEqual(beforeSchedule, afterSchedule);
+    pushHistoryEntry(QStringLiteral("导入考勤记录"), changes,
+        scheduleChanged ? &beforeSchedule : nullptr, scheduleChanged ? &afterSchedule : nullptr);
+    m_workScheduleSettingsPage->setWorkSchedule(afterSchedule);
     refreshMonthlyView();
     showStatusMessage(QString("已导入 %1 条考勤记录").arg(result.importedCount));
 }
@@ -685,11 +791,15 @@ void AttendanceMainWindow::setupUI() {
     toolbarLayout->addWidget(selectMonthBtn);
 
     m_statsLabel = new QLabel(toolbar);
+    QFont statsFont = m_statsLabel->font();
+    statsFont.setPixelSize(13);
+    statsFont.setBold(true);
+    m_statsLabel->setFont(statsFont);
     m_statsLabel->setFixedHeight(30);
     m_statsLabel->setCursor(Qt::WhatsThisCursor);
     m_statsLabel->setStyleSheet(QStringLiteral(
         "QLabel { color: #36516f; background: #f3f7fb; border: 1px solid #d9e5f0;"
-        " border-radius: 5px; padding: 0 12px; font-weight: 600; }"
+        " border-radius: 5px; padding: 0 12px; font-size: 13px; font-weight: 600; }"
         "QLabel:hover { background: #eaf3fb; border-color: #b8cfe3; }"));
     m_statsLabel->setSizePolicy(QSizePolicy::Minimum, QSizePolicy::Fixed);
     m_statsLabelFullText = QStringLiteral("平均加班 -- | 餐补 0 次");
@@ -725,23 +835,13 @@ void AttendanceMainWindow::setupUI() {
     toolbarLayout->addWidget(exportBtn);
     mainLayout->addWidget(toolbar);
 
-    auto* workspace = new QWidget(calendarPage);
-    auto* workspaceLayout = new QHBoxLayout(workspace);
-    workspaceLayout->setContentsMargins(0, 0, 0, 0);
-    workspaceLayout->setSpacing(0);
-    mainLayout->addWidget(workspace);
-
-    // 左侧：日历
-    QVBoxLayout* leftLayout = new QVBoxLayout();
-
     // 使用自定义日历控件
     m_calendar = new CustomCalendarWidget();
     m_calendar->setLocale(QLocale::Chinese);
     m_calendar->setFirstDayOfWeek(Qt::Monday);
     m_calendar->setGridVisible(true);
-    leftLayout->addWidget(m_calendar);
-    leftLayout->setContentsMargins(32, 22, 32, 30);
-    leftLayout->setSpacing(0);
+    auto* workspace = new CalendarWorkspace(m_calendar, calendarPage);
+    mainLayout->addWidget(workspace, 1);
 
     QAction* copyAction = new QAction(this);
     copyAction->setShortcut(QKeySequence::Copy);
@@ -814,12 +914,6 @@ void AttendanceMainWindow::setupUI() {
         showStatusMessage(QString("已清空当前选择"));
     });
     addAction(clearSelectionAction);
-
-    QWidget* leftWidget = new QWidget();
-    leftWidget->setLayout(leftLayout);
-    leftWidget->setMinimumWidth(680);
-    leftWidget->setStyleSheet(QStringLiteral("background: transparent;"));
-    workspaceLayout->addWidget(leftWidget);
 
     m_workScheduleSettingsPage = new WorkScheduleSettingsPage();
     m_workScheduleSettingsPage->setWorkSchedule(AttendanceStorage::loadWorkSchedule());
@@ -1125,21 +1219,27 @@ void AttendanceMainWindow::applyRecordState(const QDate& date, const AttendanceR
     }
 }
 
-void AttendanceMainWindow::pushHistoryEntry(const QString& actionText, const QList<AttendanceChange>& changes) {
-    if (changes.isEmpty()) {
+void AttendanceMainWindow::pushHistoryEntry(const QString& actionText, const QList<AttendanceChange>& changes,
+    const WorkSchedule* beforeSchedule, const WorkSchedule* afterSchedule) {
+    if (changes.isEmpty() && !(beforeSchedule && afterSchedule)) {
         return;
     }
 
     AttendanceHistoryEntry entry;
     entry.actionText = actionText;
     entry.changes = changes;
+    entry.hasScheduleChange = beforeSchedule && afterSchedule;
+    if (entry.hasScheduleChange) {
+        entry.beforeSchedule = *beforeSchedule;
+        entry.afterSchedule = *afterSchedule;
+    }
     m_undoStack.append(entry);
     m_redoStack.clear();
     updateUndoRedoActionState();
 }
 
 bool AttendanceMainWindow::applyHistoryEntry(const AttendanceHistoryEntry& entry, bool useAfterState) {
-    if (entry.changes.isEmpty()) {
+    if (entry.changes.isEmpty() && !entry.hasScheduleChange) {
         return false;
     }
 
@@ -1147,6 +1247,11 @@ bool AttendanceMainWindow::applyHistoryEntry(const AttendanceHistoryEntry& entry
         applyRecordState(change.date, useAfterState ? change.after : change.before);
     }
 
+    if (entry.hasScheduleChange) {
+        const auto& schedule = useAfterState ? entry.afterSchedule : entry.beforeSchedule;
+        AttendanceStorage::saveWorkSchedule(schedule);
+        m_workScheduleSettingsPage->setWorkSchedule(schedule);
+    }
     m_calendar->clearSelection();
     refreshMonthlyView();
     return true;
@@ -1356,6 +1461,7 @@ void AttendanceMainWindow::updateMonthlyStatistics(const MonthlyAttendanceSnapsh
             info["hasMealAllowance"] = snapshot.showMealAllowanceMarker
                 && dayView.hasMealAllowance;
             info["hasNote"] = dayView.hasNote;
+            info["hasCustomSchedule"] = dayView.hasCustomSchedule;
             info["note"] = dayView.note;
             m_calendar->setCustomData(date, info);
         }
@@ -1381,6 +1487,12 @@ void AttendanceMainWindow::updateMonthlyStatistics(const MonthlyAttendanceSnapsh
     if (snapshot.workDays > 0) {
         stats += QString("平均加班时间: %1小时").arg(averageOvertime);
     }
+    if (!stats.endsWith(QLatin1Char('\n'))) stats += QLatin1Char('\n');
+    stats += AttendanceStatsService::describeOvertimeTargetGap(snapshot, 120);
+    stats += QLatin1Char('\n')
+        + AttendanceStatsService::describeOvertimeTargetGap(snapshot, 150);
+    stats += QLatin1Char('\n')
+        + AttendanceStatsService::describeOvertimeTargetGap(snapshot, 180);
 
     m_monthlyStatsText = stats;
     m_statsLabelFullText = QString("平均加班 %1 小时 | 餐补 %2 次")
@@ -1763,7 +1875,7 @@ void AttendanceMainWindow::showAboutDialog()
 
     auto* detailsLabel = new QLabel(
         QStringLiteral("名称：工时簿\n版本：%1\n数据存储：本地 SQLite 数据库\n数据迁移：支持 JSON 导入与导出\n\n"
-                       "所有考勤记录仅保存于当前设备，可通过导出文件迁移。")
+                       "考勤记录保存在本机。开启自动备份后，完整数据库会上传至配置的局域网服务器，并保留最近三天。")
             .arg(QCoreApplication::applicationVersion()), dialog);
     detailsLabel->setWordWrap(true);
     detailsLabel->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);

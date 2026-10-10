@@ -9,9 +9,11 @@
 #include <QTextCharFormat>
 #include <QVariantMap>
 #include <QWidget>
+#include <functional>
 
 class QContextMenuEvent;
 class QMouseEvent;
+class QKeyEvent;
 class QPaintEvent;
 class QWheelEvent;
 class CalendarNoteTip;
@@ -22,7 +24,8 @@ class CustomCalendarWidget : public QWidget {
     Q_OBJECT
 
 public:
-    explicit CustomCalendarWidget(QWidget* parent = nullptr);
+    explicit CustomCalendarWidget(QWidget* parent = nullptr,
+        std::function<QDate()> todayProvider = {});
 
     void setFirstDayOfWeek(Qt::DayOfWeek dayOfWeek);
     void setGridVisible(bool visible);
@@ -59,9 +62,11 @@ protected:
     void mouseDoubleClickEvent(QMouseEvent* event) override;
     void wheelEvent(QWheelEvent* event) override;
     void contextMenuEvent(QContextMenuEvent* event) override;
+    void keyPressEvent(QKeyEvent* event) override;
     void leaveEvent(QEvent* event) override;
 
 private:
+    friend class LegacyUiTests;
     QRect previousMonthButtonRect() const;
     QRect nextMonthButtonRect() const;
     QRect yearOverviewButtonRect() const;
@@ -93,6 +98,7 @@ private:
     QSet<QDate> m_yearRecordDates;
     QList<QDate> m_selectedDates;
     QDate m_selectionAnchorDate;
+    std::function<QDate()> m_todayProvider;
     QDate m_pageDate;
     QDate m_hoveredDate;
     QList<QDate> m_contextMenuDates;

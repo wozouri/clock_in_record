@@ -3,6 +3,7 @@
 #include "Data/AttendanceStorage.h"
 #include "Utils/SingleInstanceGuard.h"
 #include "Utils/AppFont.h"
+#include "Utils/ScreenLayout.h"
 
 #include <QApplication>
 #include <QDateTime>
@@ -31,6 +32,7 @@ void messageOutput(QtMsgType type, const QMessageLogContext& context, const QStr
 
 int main(int argc, char* argv[])
 {
+    ScreenLayout::enableHighDpiSupport();
     QApplication app(argc, argv);
 
 #if defined(Q_OS_WIN) && defined(_DEBUG)

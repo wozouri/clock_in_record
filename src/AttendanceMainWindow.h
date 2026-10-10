@@ -31,6 +31,7 @@ class BackupClient;
 // 主窗口
 class AttendanceMainWindow : public ElaWindow {
     Q_OBJECT
+    friend class LegacyUiTests;
 
 public:
     explicit AttendanceMainWindow(QWidget* parent = nullptr);
@@ -79,9 +80,13 @@ private:
     struct AttendanceHistoryEntry {
         QString actionText;
         QList<AttendanceChange> changes;
+        bool hasScheduleChange = false;
+        WorkSchedule beforeSchedule;
+        WorkSchedule afterSchedule;
     };
 
     void setupUI();
+    void updateScreenLayout();
     void updateNavigationBarAppearance();
     void refreshMonthlyView();
     void updateBatchActionState();
@@ -90,7 +95,8 @@ private:
     void showStatusMessage(const QString& message, int timeoutMs = 2000);
     AttendanceRecordState captureRecordState(const QDate& date) const;
     void applyRecordState(const QDate& date, const AttendanceRecordState& state);
-    void pushHistoryEntry(const QString& actionText, const QList<AttendanceChange>& changes);
+    void pushHistoryEntry(const QString& actionText, const QList<AttendanceChange>& changes,
+        const WorkSchedule* beforeSchedule = nullptr, const WorkSchedule* afterSchedule = nullptr);
     bool applyHistoryEntry(const AttendanceHistoryEntry& entry, bool useAfterState);
     void updateUndoRedoActionState();
 

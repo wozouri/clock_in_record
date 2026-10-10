@@ -1,4 +1,5 @@
 #include "CustomCalendarWidget.h"
+#include <QKeyEvent>
 
 #include "Data/AttendanceStorage.h"
 
@@ -16,6 +17,7 @@
 #include <QPainter>
 #include <QPointer>
 #include <QScreen>
+#include "ScreenLayout.h"
 #include <QTimer>
 #include <QTextDocument>
 #include <QtMath>
@@ -70,9 +72,10 @@ QColor softenedRecordColor(const QColor& color)
         return QColor(QStringLiteral("#d8f6df"));
     }
 
-    QColor result = color.lighter(108);
-    result.setAlpha(205);
-    return result;
+    // Mix with white rather than increasing brightness: preserve the two record
+    // categories while keeping the date and times visually stronger than the fill.
+    return QColor((color.red() + 255) / 2, (color.green() + 255) / 2,
+        (color.blue() + 255) / 2);
 }
 }
 
@@ -96,6 +99,10 @@ public:
         connect(&m_glowTimer, &QTimer::timeout, this, [this] {
             m_glowPhase = (m_glowPhase + 1) % 96;
             update();
+        });
+        new WindowScreenTracker(this, [this] {
+            updateGeometryForContent();
+            reposition();
         });
     }
 
@@ -160,7 +167,7 @@ private:
         if (QScreen* screen = QApplication::screenAt(m_anchor->mapToGlobal(m_cell.center()))) {
             return screen;
         }
-        return m_anchor->windowHandle() ? m_anchor->windowHandle()->screen() : nullptr;
+        return ScreenLayout::screenForWidget(m_anchor);
     }
 
     void trackWindow(QWidget* window)
@@ -217,17 +224,17 @@ private:
             return;
         }
         const QRect available = screen->availableGeometry();
+        if (windowHandle() && windowHandle()->screen() != screen) {
+            windowHandle()->setScreen(screen);
+            updateGeometryForContent();
+        }
         const QRect cellGlobal(m_anchor->mapToGlobal(m_cell.topLeft()), m_cell.size());
         constexpr int kGap = 8;
         QPoint position(cellGlobal.center().x() - width() / 2, cellGlobal.top() - height() - kGap);
         if (position.y() < available.top() + kGap) {
             position.setY(cellGlobal.bottom() + kGap);
         }
-        position.setX(qBound(available.left() + kGap, position.x(),
-            available.right() - width() - kGap));
-        position.setY(qBound(available.top() + kGap, position.y(),
-            available.bottom() - height() - kGap));
-        move(position);
+        setGeometry(ScreenLayout::fittedGeometry(QRect(position, size()), available, kGap));
     }
 
     QLabel* m_content = nullptr;
@@ -239,11 +246,13 @@ private:
     int m_glowPhase = 0;
 };
 
-CustomCalendarWidget::CustomCalendarWidget(QWidget* parent)
+CustomCalendarWidget::CustomCalendarWidget(QWidget* parent, std::function<QDate()> todayProvider)
     : QWidget(parent)
-    , m_pageDate(QDate(QDate::currentDate().year(), QDate::currentDate().month(), 1))
+    , m_todayProvider(todayProvider ? std::move(todayProvider) : [] { return QDate::currentDate(); })
+    , m_pageDate(QDate(m_todayProvider().year(), m_todayProvider().month(), 1))
 {
     setMouseTracking(true);
+    setFocusPolicy(Qt::StrongFocus);
     m_noteTip = new CalendarNoteTip(this);
     setMinimumHeight(440);
     setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
@@ -436,7 +445,7 @@ void CustomCalendarWidget::paintEvent(QPaintEvent* event)
 
     painter.save();
     QFont titleFont = painter.font();
-    titleFont.setPointSize(14);
+    titleFont.setPixelSize(width() >= 1280 && height() >= 740 ? 22 : 20);
     titleFont.setBold(true);
     painter.setFont(titleFont);
     painter.setPen(QColor(QStringLiteral("#172b4d")));
@@ -452,7 +461,7 @@ void CustomCalendarWidget::paintEvent(QPaintEvent* event)
     painter.drawRoundedRect(viewButton, 5, 5);
     painter.setPen(QColor(QStringLiteral("#28649a")));
     QFont viewButtonFont = painter.font();
-    viewButtonFont.setPointSize(9);
+    viewButtonFont.setPixelSize(12);
     viewButtonFont.setBold(true);
     painter.setFont(viewButtonFont);
     painter.drawText(viewButton, Qt::AlignCenter,
@@ -467,7 +476,7 @@ void CustomCalendarWidget::paintEvent(QPaintEvent* event)
     const QRect weekdayHeader = weekHeaderRect();
     painter.fillRect(weekdayHeader, QColor(QStringLiteral("#f8fafc")));
     QFont weekdayFont = painter.font();
-    weekdayFont.setPointSize(9);
+    weekdayFont.setPixelSize(width() >= 1280 && height() >= 740 ? 14 : 13);
     weekdayFont.setBold(true);
     painter.setFont(weekdayFont);
     for (int column = 0; column < kGridColumns; ++column) {
@@ -482,7 +491,7 @@ void CustomCalendarWidget::paintEvent(QPaintEvent* event)
     painter.drawLine(weekdayHeader.bottomLeft(), weekdayHeader.bottomRight());
 
     const QDate firstDate = firstVisibleDate();
-    const QDate today = QDate::currentDate();
+    const QDate today = m_todayProvider();
     for (int row = 0; row < kGridRows; ++row) {
         for (int column = 0; column < kGridColumns; ++column) {
             const QRect cell = cellRect(row, column);
@@ -503,26 +512,43 @@ void CustomCalendarWidget::paintEvent(QPaintEvent* event)
             }
 
             const QRect cardRect = cell.adjusted(4, 4, -4, -4);
+            const bool compact = cardRect.height() < 64 || cardRect.width() < 100;
+            const int enlargement = qBound(0, (cardRect.height() - 84) / 12, 2);
+            const int padding = cardRect.height() < 84 ? 6 : 8 + enlargement;
+            const int dateSize = compact ? 20 : 22 + enlargement * 2;
+            const int markerHeight = compact ? 16 : 18 + enlargement;
+            const int markerWidth = 18 + enlargement * 2;
+            const int markerFontSize = 11 + enlargement;
+            const int timeFontSize = compact ? 10 : 12 + enlargement;
+            const QRect dateRect(cardRect.left() + padding, cardRect.top() + padding,
+                dateSize, dateSize);
+            const int footerY = cardRect.bottom() + 1 - padding - markerHeight;
             if (hasRecord) {
                 painter.save();
                 painter.setPen(Qt::NoPen);
                 painter.setBrush(softenedRecordColor(m_dayBackgrounds.value(date)));
-                painter.drawRoundedRect(cardRect, 6, 6);
+                painter.drawRoundedRect(cardRect, 8, 8);
                 painter.restore();
             } else if (selected || (hovered && isCurrentMonth)) {
                 painter.save();
                 painter.setPen(Qt::NoPen);
                 painter.setBrush(selected ? QColor(QStringLiteral("#d9ecfb"))
                                           : QColor(QStringLiteral("#f2f7fc")));
-                painter.drawRoundedRect(cardRect, 6, 6);
+                painter.drawRoundedRect(cardRect, 8, 8);
                 painter.restore();
+            }
+
+            if (hasRecord && hovered && !selected) {
+                painter.setPen(QPen(QColor(QStringLiteral("#8eafc5")), 1));
+                painter.setBrush(Qt::NoBrush);
+                painter.drawRoundedRect(cardRect.adjusted(1, 1, -1, -1), 7, 7);
             }
 
             if (selected) {
                 painter.save();
                 painter.setPen(QPen(QColor(QStringLiteral("#1f79bd")), 2));
                 painter.setBrush(Qt::NoBrush);
-                painter.drawRoundedRect(cardRect.adjusted(1, 1, -1, -1), 5, 5);
+                painter.drawRoundedRect(cardRect.adjusted(1, 1, -1, -1), 7, 7);
                 painter.restore();
             }
             if (contextMenuTarget) {
@@ -536,13 +562,13 @@ void CustomCalendarWidget::paintEvent(QPaintEvent* event)
                 painter.save();
                 painter.setPen(QPen(QColor(QStringLiteral("#5d9ed4")), 1));
                 painter.setBrush(Qt::NoBrush);
-                painter.drawRoundedRect(cardRect.adjusted(1, 1, -1, -1), 5, 5);
+                painter.drawRoundedRect(cardRect.adjusted(1, 1, -1, -1), 7, 7);
                 painter.restore();
             }
 
             painter.save();
             QFont dayFont = painter.font();
-            dayFont.setPointSize(10);
+            dayFont.setPixelSize(compact ? 12 : 13 + enlargement);
             dayFont.setBold(selected || date == today);
             painter.setFont(dayFont);
             QColor dayColor = QColor(QStringLiteral("#263b53"));
@@ -551,26 +577,40 @@ void CustomCalendarWidget::paintEvent(QPaintEvent* event)
             } else if (isWeekend) {
                 dayColor = QColor(QStringLiteral("#d64d4d"));
             }
-            painter.setPen(dayColor);
-            painter.drawText(QRect(cardRect.left() + 8, cardRect.top() + 5,
-                                 cardRect.width() - 16, 18),
-                Qt::AlignLeft | Qt::AlignVCenter, QString::number(date.day()));
+            if (date == today) {
+                painter.setPen(Qt::NoPen);
+                painter.setBrush(QColor(QStringLiteral("#1769aa")));
+                painter.drawEllipse(dateRect);
+                painter.setPen(Qt::white);
+                painter.drawText(dateRect, Qt::AlignCenter, QString::number(date.day()));
+            } else {
+                painter.setPen(dayColor);
+                painter.drawText(dateRect, Qt::AlignCenter, QString::number(date.day()));
+            }
             painter.restore();
 
             if (hasRecord) {
                 painter.save();
                 QFont timeFont = painter.font();
-                timeFont.setPointSize(cell.height() >= 72 ? 8 : 7);
-                timeFont.setBold(true);
+                timeFont.setPixelSize(timeFontSize);
+                timeFont.setBold(false);
                 painter.setFont(timeFont);
-                painter.setPen(QColor(QStringLiteral("#1269b0")));
-                const QRect arrivalRect(cardRect.left() + 6, cardRect.top() + cardRect.height() / 2 - 13,
-                    cardRect.width() - 12, 14);
-                const QRect departureRect(cardRect.left() + 6, cardRect.top() + cardRect.height() / 2 + 3,
-                    cardRect.width() - 12, 14);
+                const int lineHeight = timeFontSize + (compact ? 2 : 4);
+                // Short rows put times beside the date instead of stacking all
+                // three sections into a height that cannot accommodate them.
+                const int timeLeft = compact ? dateRect.right() + 7 : cardRect.left() + padding;
+                const int timeRight = cardRect.right() - padding - (compact ? 10 : 0);
+                const int timeBlockHeight = lineHeight * 2 + (compact ? 0 : 2);
+                const int timeTop = compact ? dateRect.top()
+                    : qMin(cardRect.top() + (cardRect.height() - timeBlockHeight) / 2,
+                        footerY - timeBlockHeight - 2);
+                const QRect arrivalRect(timeLeft, timeTop, timeRight - timeLeft + 1, lineHeight);
+                const QRect departureRect(timeLeft, timeTop + lineHeight + (compact ? 0 : 2),
+                    arrivalRect.width(), lineHeight);
+                painter.setPen(QColor(QStringLiteral("#245c78")));
                 painter.drawText(arrivalRect, Qt::AlignCenter,
                     dayData.value(QStringLiteral("arrivalTime")).toString());
-                painter.setPen(QColor(QStringLiteral("#2359a6")));
+                painter.setPen(QColor(QStringLiteral("#526777")));
                 painter.drawText(departureRect, Qt::AlignCenter,
                     dayData.value(QStringLiteral("departureTime")).toString());
                 painter.restore();
@@ -579,22 +619,37 @@ void CustomCalendarWidget::paintEvent(QPaintEvent* event)
             if (dayData.value(QStringLiteral("hasNote")).toBool()) {
                 painter.save();
                 painter.setPen(Qt::NoPen);
-                painter.setBrush(QColor(QStringLiteral("#e49b26")));
-                painter.drawEllipse(QPoint(cardRect.right() - 9, cardRect.top() + 10), 3, 3);
+                painter.setBrush(QColor(QStringLiteral("#c98a30")));
+                painter.drawEllipse(QPoint(cardRect.right() - padding - 3, dateRect.center().y()), 3, 3);
                 painter.restore();
             }
 
+            if (dayData.value(QStringLiteral("hasCustomSchedule")).toBool()) {
+                painter.save();
+                const QRect marker(cardRect.right() + 1 - padding - markerWidth, footerY, markerWidth, markerHeight);
+                painter.setPen(Qt::NoPen);
+                painter.setBrush(QColor(QStringLiteral("#eee8f7")));
+                painter.drawRoundedRect(marker, 4, 4);
+                QFont font = painter.font();
+                font.setPixelSize(markerFontSize);
+                font.setStyleStrategy(QFont::StyleStrategy(QFont::PreferAntialias | QFont::NoSubpixelAntialias));
+                painter.setFont(font);
+                painter.setPen(QColor(QStringLiteral("#74559c")));
+                painter.drawText(marker, Qt::AlignCenter, QStringLiteral("作"));
+                painter.restore();
+            }
             if (dayData.value(QStringLiteral("hasMealAllowance")).toBool()) {
                 painter.save();
-                const QRect mealAllowanceRect(cardRect.left() + 7, cardRect.bottom() - 19, 18, 14);
+                const QRect mealAllowanceRect(cardRect.left() + padding, footerY, markerWidth, markerHeight);
                 painter.setPen(Qt::NoPen);
-                painter.setBrush(QColor(QStringLiteral("#e07a28")));
-                painter.drawRoundedRect(mealAllowanceRect, 3, 3);
+                painter.setBrush(QColor(QStringLiteral("#fff0dc")));
+                painter.drawRoundedRect(mealAllowanceRect, 4, 4);
                 QFont mealAllowanceFont = painter.font();
-                mealAllowanceFont.setPointSize(7);
-                mealAllowanceFont.setBold(true);
+                mealAllowanceFont.setPixelSize(markerFontSize);
+                mealAllowanceFont.setStyleStrategy(QFont::StyleStrategy(QFont::PreferAntialias | QFont::NoSubpixelAntialias));
+                mealAllowanceFont.setBold(false);
                 painter.setFont(mealAllowanceFont);
-                painter.setPen(Qt::white);
+                painter.setPen(QColor(QStringLiteral("#a86c22")));
                 painter.drawText(mealAllowanceRect, Qt::AlignCenter, QStringLiteral("餐"));
                 painter.restore();
             }
@@ -750,6 +805,17 @@ void CustomCalendarWidget::contextMenuEvent(QContextMenuEvent* event)
     }
     showContextMenu(event->pos(), event->globalPos());
     event->accept();
+}
+
+void CustomCalendarWidget::keyPressEvent(QKeyEvent* event)
+{
+    if (!m_yearOverviewVisible && m_selectedDates.size() == 1
+        && (event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter || event->key() == Qt::Key_F2)) {
+        emit dateDoubleClicked(m_selectedDates.first());
+        event->accept();
+        return;
+    }
+    QWidget::keyPressEvent(event);
 }
 
 void CustomCalendarWidget::enterEvent(QEvent* event)
@@ -936,12 +1002,7 @@ void CustomCalendarWidget::showContextMenu(const QPoint& position, const QPoint&
             deletableDates.append(date);
         }
     }
-    if (deletableDates.isEmpty()) {
-        return;
-    }
-
-    // This menu only exposes deletion for a multi-selection. Mark the records
-    // that will actually be deleted, while keeping blank dates as normal selections.
+    // 只给已有记录标记删除范围；空白日期也能新建记录。
     m_contextMenuDates = deletableDates;
     repaint();
     QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
@@ -949,14 +1010,19 @@ void CustomCalendarWidget::showContextMenu(const QPoint& position, const QPoint&
     CalendarContextMenu contextMenu;
     contextMenu.setMenuItemHeight(34);
     QAction* copyAction = nullptr;
+    QAction* editAction = nullptr;
     if (targetDates.size() == 1) {
+        editAction = contextMenu.addElaIconAction(ElaIconType::Pen,
+            deletableDates.isEmpty() ? QStringLiteral("记录考勤") : QStringLiteral("编辑记录"));
         copyAction = contextMenu.addElaIconAction(ElaIconType::Clipboard, QStringLiteral("复制"));
+        copyAction->setEnabled(!deletableDates.isEmpty());
         contextMenu.addSeparator();
     }
     QAction* deleteAction = contextMenu.addElaIconAction(ElaIconType::TrashCan,
         deletableDates.size() == 1
             ? QStringLiteral("删除 %1 的记录").arg(deletableDates.first().toString(QStringLiteral("yyyy-MM-dd")))
             : QStringLiteral("删除选中的 %1 条记录").arg(deletableDates.size()));
+    deleteAction->setEnabled(!deletableDates.isEmpty());
 
     // ElaMenu may retain an active action when dismissed outside its bounds.
     // Accept the returned action only when the final cursor position is inside it.
@@ -967,7 +1033,10 @@ void CustomCalendarWidget::showContextMenu(const QPoint& position, const QPoint&
         || !contextMenu.actionGeometry(selectedAction).contains(contextMenu.mapFromGlobal(QCursor::pos()))) {
         return;
     }
-    if (selectedAction == copyAction) {
+    if (selectedAction == editAction) {
+        setSingleSelection(clickedDate);
+        emit dateDoubleClicked(clickedDate);
+    } else if (selectedAction == copyAction) {
         emit copyRequested(targetDates.first());
     } else if (selectedAction == deleteAction) {
         emit deleteRequested(deletableDates);
@@ -998,7 +1067,7 @@ void CustomCalendarWidget::refreshYearRecordDates()
 
 void CustomCalendarWidget::paintYearOverview(QPainter& painter)
 {
-    const QDate today = QDate::currentDate();
+    const QDate today = m_todayProvider();
     const int currentYear = m_pageDate.year();
     for (int month = 1; month <= 12; ++month) {
         const QRect monthRect = monthPreviewRect(month);
@@ -1017,7 +1086,7 @@ void CustomCalendarWidget::paintYearOverview(QPainter& painter)
         painter.setPen(isActiveMonth ? QColor(QStringLiteral("#1769aa"))
                                      : QColor(QStringLiteral("#334e68")));
         QFont titleFont = painter.font();
-        titleFont.setPointSize(9);
+        titleFont.setPixelSize(12);
         titleFont.setBold(true);
         painter.setFont(titleFont);
         painter.drawText(titleRect, Qt::AlignCenter, QStringLiteral("%1 月").arg(month));
@@ -1027,9 +1096,9 @@ void CustomCalendarWidget::paintYearOverview(QPainter& painter)
         const int offset = (monthStart.dayOfWeek() - static_cast<int>(m_firstDayOfWeek) + kGridColumns)
             % kGridColumns;
         const QDate firstDate = monthStart.addDays(-offset);
-        const int miniFontSize = qBound(6, miniGrid.height() / 16, 8);
+        const int miniFontSize = qBound(8, miniGrid.height() / 10, 12);
         QFont dayFont = painter.font();
-        dayFont.setPointSize(miniFontSize);
+        dayFont.setPixelSize(miniFontSize);
         painter.setFont(dayFont);
 
         for (int row = 0; row < kGridRows; ++row) {
