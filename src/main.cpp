@@ -2,6 +2,7 @@
 #include "AppVersion.h"
 #include "Data/AttendanceStorage.h"
 #include "Utils/SingleInstanceGuard.h"
+#include "Utils/AppFont.h"
 
 #include <QApplication>
 #include <QDateTime>
@@ -68,10 +69,7 @@ int main(int argc, char* argv[])
     eApp->init();
     eTheme->setThemeMode(ElaThemeType::Light);
 
-    QFont font = app.font();
-    font.setFamily("Microsoft YaHei");
-    font.setPointSize(10);
-    app.setFont(font);
+    initializeAppFont();
 
     AttendanceMainWindow window;
     QObject::connect(&instance, &SingleInstanceGuard::activationRequested, &window, [&window] {
