@@ -116,6 +116,10 @@ private slots:
         AttendanceRecord record;
         record.note = QStringLiteral("完整备注，包含中文");
         record.needAverageCal = false;
+        record.excludeStandardOvertime = false;
+        record.hasCustomSchedule = true;
+        record.customSchedule.workStartTime = QTime(8, 30);
+        record.customScheduleJson = QStringLiteral("{\"workStart\":\"08:30\",\"futureField\":\"preserved\"}");
         AttendanceStorage::saveRecord(QDate(2020, 1, 1), record);
         AttendanceStorage::saveRecord(QDate(2026, 10, 9), record);
         AttendanceStorage::saveRecord(QDate(2027, 1, 1), record);
@@ -140,6 +144,12 @@ private slots:
             QCOMPARE(query.value(0).toInt(), 3);
             QCOMPARE(query.value(1).toInt(), 0);
             QCOMPARE(query.value(2).toString(), record.note);
+            QVERIFY(query.exec(QStringLiteral("SELECT exclude_standard_overtime, custom_schedule FROM records LIMIT 1")));
+            QVERIFY(query.next());
+            QCOMPARE(query.value(0).toInt(), 0);
+            const auto custom = QJsonDocument::fromJson(query.value(1).toByteArray()).object();
+            QCOMPARE(custom.value(QStringLiteral("workStart")).toString(), QStringLiteral("08:30"));
+            QCOMPARE(custom.value(QStringLiteral("futureField")).toString(), QStringLiteral("preserved"));
             QVERIFY(query.exec(QStringLiteral("SELECT meal_allowance_time, show_meal_allowance_marker FROM work_schedule")));
             QVERIFY(query.next());
             QCOMPARE(query.value(0).toString(), QStringLiteral("20:45"));

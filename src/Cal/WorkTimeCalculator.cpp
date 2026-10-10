@@ -18,8 +18,9 @@ int overlapMinutes(const QTime& rangeStart,
 
 WorkTimeResult WorkTimeCalculator::calculateWorkTimeResult(
     const AttendanceRecord& record,
-    const WorkSchedule& schedule)
+    const WorkSchedule& globalSchedule)
 {
+    const WorkSchedule& schedule = record.hasCustomSchedule ? record.customSchedule : globalSchedule;
     WorkTimeResult result;
     if (record.arrivalTime >= record.departureTime
         || schedule.workStartTime >= schedule.workEndTime) {
@@ -62,5 +63,21 @@ WorkTimeResult WorkTimeCalculator::calculateWorkTimeResult(
     const int standardTotalMinutes = schedule.workStartTime.secsTo(schedule.workEndTime) / 60;
     result.standardWorkMinutes = std::max(0, standardTotalMinutes - standardBreakMinutes);
     result.overtimeMinutes = result.actualWorkMinutes - result.standardWorkMinutes;
+    if (!record.needAverageCal) {
+        if (!record.excludeStandardOvertime) {
+            result.overtimeMinutes = result.actualWorkMinutes;
+        } else {
+            const QTime insideStart = std::max(record.arrivalTime, schedule.workStartTime);
+            const QTime insideEnd = std::min(record.departureTime, schedule.workEndTime);
+            int insideBreak = 0;
+            if (insideStart < insideEnd) {
+                if (schedule.lunchBreakEnabled) insideBreak += overlapMinutes(insideStart, insideEnd, schedule.lunchBreakStart, schedule.lunchBreakEnd);
+                if (schedule.dinnerBreakEnabled) insideBreak += overlapMinutes(insideStart, insideEnd, schedule.dinnerBreakStart, schedule.dinnerBreakEnd);
+            }
+            const int insideWork = overlapMinutes(record.arrivalTime, record.departureTime,
+                schedule.workStartTime, schedule.workEndTime) - insideBreak;
+            result.overtimeMinutes = std::max(0, result.actualWorkMinutes - insideWork);
+        }
+    }
     return result;
 }

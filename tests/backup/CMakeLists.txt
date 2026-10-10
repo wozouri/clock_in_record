@@ -10,6 +10,7 @@ add_executable(backup_tests BackupTests.cpp
     ../../src/Data/AttendanceStorage.cpp
     ../../src/Update/UpdateChecker.cpp
     ../../src/Update/ClientVersion.cpp)
+set_target_properties(backup_tests PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 target_include_directories(backup_tests PRIVATE ../../src ../../service)
 target_link_libraries(backup_tests PRIVATE Qt${QT_VERSION_MAJOR}::Core
     Qt${QT_VERSION_MAJOR}::Network Qt${QT_VERSION_MAJOR}::Sql Qt${QT_VERSION_MAJOR}::Test)
@@ -18,4 +19,5 @@ if(MSVC)
 endif()
 enable_testing()
 add_test(NAME backup COMMAND backup_tests)
-set_tests_properties(backup PROPERTIES TIMEOUT 90)
+set_tests_properties(backup PROPERTIES TIMEOUT 90
+    ENVIRONMENT "ATTENDANCE_BACKUP_TEST_SERVICE=$<TARGET_FILE:AttendanceUpdateService>")

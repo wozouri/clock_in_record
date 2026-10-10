@@ -93,7 +93,7 @@ int main(int argc, char** argv)
     require(extraFields(db, version) == extras, "edit and import preserve all older version additional fields");
     QSqlQuery schema(db);
     require(schema.exec("SELECT value FROM schema_info WHERE key='schema_version'") && schema.next(), "schema metadata readable");
-    require(schema.value(0).toInt() == version, "schema version is never downgraded");
+    require(schema.value(0).toInt() == qMax(version, 6), "older schemas migrate to 6 without downgrading");
     schema.finish();
     const auto bytes = AttendanceStorage::createBackup(error);
     require(!bytes.isEmpty() && error.isEmpty(), "complete backup succeeds");

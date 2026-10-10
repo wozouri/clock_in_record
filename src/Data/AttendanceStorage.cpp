@@ -1,4 +1,5 @@
 #include "AttendanceStorage.h"
+#include "WorkScheduleCodec.h"
 
 #include <QDebug>
 #include <QDir>
@@ -18,8 +19,7 @@ namespace {
 
 constexpr auto kTimeFormat = "hh:mm";
 constexpr auto kConnectionName = "attendance-storage";
-constexpr auto kSchemaVersion = 4;
-// 已发布的版本 5、6 只给 records 增加字段，现有查询仍兼容。
+constexpr auto kSchemaVersion = 6;
 constexpr auto kCompatibleSchemaVersion = 6;
 
 QTime readTime(const QString& value, const QTime& fallback)
@@ -123,15 +123,20 @@ bool writeRecord(QSqlDatabase database, const QDate& date, const AttendanceRecor
     QSqlQuery query(database);
     query.prepare(
         "INSERT INTO records "
-        "(record_date, need_average_cal, arrival_time, departure_time, note) VALUES (?, ?, ?, ?, ?) "
+        "(record_date, need_average_cal, arrival_time, departure_time, note, exclude_standard_overtime, custom_schedule) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?) "
         "ON CONFLICT(record_date) DO UPDATE SET "
         "need_average_cal = excluded.need_average_cal, arrival_time = excluded.arrival_time, "
-        "departure_time = excluded.departure_time, note = excluded.note");
+        "departure_time = excluded.departure_time, note = excluded.note, "
+        "exclude_standard_overtime = excluded.exclude_standard_overtime, custom_schedule = excluded.custom_schedule");
     query.addBindValue(date.toString("yyyy-MM-dd"));
     query.addBindValue(record.needAverageCal);
     query.addBindValue(record.arrivalTime.toString(kTimeFormat));
     query.addBindValue(record.departureTime.toString(kTimeFormat));
-    query.addBindValue(record.note);
+    query.addBindValue(record.note.isNull() ? QStringLiteral("") : record.note);
+    query.addBindValue(record.excludeStandardOvertime);
+    const QString customJson = recordScheduleJson(record);
+    query.addBindValue(customJson.isNull() ? QStringLiteral("") : customJson);
     if (!query.exec()) {
         logQueryError(query, QStringLiteral("saving record"));
         return false;
@@ -152,7 +157,9 @@ bool initializeSchema(QSqlDatabase database)
             "need_average_cal INTEGER NOT NULL DEFAULT 1, "
             "arrival_time TEXT NOT NULL, "
             "departure_time TEXT NOT NULL, "
-            "note TEXT NOT NULL DEFAULT '')")) {
+            "note TEXT NOT NULL DEFAULT '', "
+            "exclude_standard_overtime INTEGER NOT NULL DEFAULT 1, "
+            "custom_schedule TEXT NOT NULL DEFAULT '')")) {
         logQueryError(query, QStringLiteral("creating records table"));
         return false;
     }
@@ -259,6 +266,16 @@ bool migrateSchema(QSqlDatabase database, int currentVersion)
         }
     }
 
+    if (success && currentVersion < 5) {
+        QSqlQuery query(database);
+        success = query.exec("ALTER TABLE records ADD COLUMN exclude_standard_overtime INTEGER NOT NULL DEFAULT 1");
+        if (!success) logQueryError(query, QStringLiteral("adding statistics flag"));
+    }
+    if (success && currentVersion < 6) {
+        QSqlQuery query(database);
+        success = query.exec("ALTER TABLE records ADD COLUMN custom_schedule TEXT NOT NULL DEFAULT ''");
+        if (!success) logQueryError(query, QStringLiteral("adding custom schedule"));
+    }
     QSqlQuery versionQuery(database);
     versionQuery.prepare("UPDATE schema_info SET value = ? WHERE key = 'schema_version'");
     versionQuery.addBindValue(kSchemaVersion);
@@ -392,7 +409,7 @@ AttendanceRecord AttendanceStorage::loadRecord(const QDate& date)
     }
 
     QSqlQuery query(database);
-    query.prepare("SELECT need_average_cal, arrival_time, departure_time, note FROM records WHERE record_date = ?");
+    query.prepare("SELECT need_average_cal, arrival_time, departure_time, note, exclude_standard_overtime, custom_schedule FROM records WHERE record_date = ?");
     query.addBindValue(dateKey(date));
     if (!query.exec()) {
         logQueryError(query, QStringLiteral("loading record"));
@@ -406,6 +423,11 @@ AttendanceRecord AttendanceStorage::loadRecord(const QDate& date)
     record.arrivalTime = readTime(query.value(1).toString(), record.arrivalTime);
     record.departureTime = readTime(query.value(2).toString(), record.departureTime);
     record.note = query.value(3).toString();
+    record.excludeStandardOvertime = query.value(4).toBool();
+    record.customScheduleJson = query.value(5).toString();
+    const auto custom = QJsonDocument::fromJson(record.customScheduleJson.toUtf8());
+    record.hasCustomSchedule = custom.isObject() && !custom.object().isEmpty();
+    if (record.hasCustomSchedule) record.customSchedule = scheduleFromJson(custom.object());
     return record;
 }
 

@@ -18,9 +18,13 @@ struct WorkSchedule {
 
 struct AttendanceRecord {
     bool needAverageCal = true;
+    bool excludeStandardOvertime = true;
     QTime arrivalTime = QTime(9, 0);
     QTime departureTime = QTime(18, 0);
     QString note;
+    bool hasCustomSchedule = false;
+    WorkSchedule customSchedule;
+    QString customScheduleJson;
 };
 
 struct WorkTimeResult {

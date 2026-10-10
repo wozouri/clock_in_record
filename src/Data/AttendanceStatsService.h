@@ -12,6 +12,7 @@ struct AttendanceDayView {
     QString departureText;
     bool hasMealAllowance = false;
     bool hasNote = false;
+    bool hasCustomSchedule = false;
     QString note;
 };
 
@@ -31,6 +32,8 @@ struct MonthlyAttendanceSnapshot {
 class AttendanceStatsService {
 public:
     static MonthlyAttendanceSnapshot buildMonthlySnapshot(int year, int month);
+    static QString describeOvertimeTargetGap(const MonthlyAttendanceSnapshot& snapshot,
+        int dailyTargetMinutes);
 };
 
 #endif // ATTENDANCESTATSSERVICE_H
