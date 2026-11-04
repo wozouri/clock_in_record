@@ -10,6 +10,23 @@
 
 namespace {
 
+bool isNoteOnlyRow(const QJsonObject& row)
+{
+    if (!row.value("note").isString()) return false;
+    for (const auto* key : {"check_in", "check_out"}) {
+        if (row.contains(key) && (!row.value(key).isString() || !row.value(key).toString().isEmpty()))
+            return false;
+    }
+    return true;
+}
+
+bool isImportableRow(const QJsonObject& row)
+{
+    return isNoteOnlyRow(row)
+        || QTime::fromString(row.value("check_in").toString(), "hh:mm").isValid()
+        || QTime::fromString(row.value("check_out").toString(), "hh:mm").isValid();
+}
+
 bool updateTimeIfPresent(const QJsonObject& row, const char* key, QTime& target)
 {
     if (!row.contains(key)) {
@@ -53,8 +70,7 @@ AttendanceImportPreview AttendanceJsonService::previewImport(const QString& file
     for (const auto& value : document.array()) {
         const auto row = value.toObject();
         const QDate date = QDate::fromString(row.value("date").toString(), "yyyy-MM-d");
-        if (!date.isValid() || (!QTime::fromString(row.value("check_in").toString(), "hh:mm").isValid()
-            && !QTime::fromString(row.value("check_out").toString(), "hh:mm").isValid())) continue;
+        if (!date.isValid() || !isImportableRow(row)) continue;
         if (!preview.dates.contains(date)) {
             preview.dates.append(date);
             if (AttendanceStorage::hasArrivalRecord(date)) ++preview.overwrittenCount;
@@ -115,13 +131,14 @@ AttendanceImportResult AttendanceJsonService::importFromLarkJson(const QString& 
 
         const QString checkIn = row.value("check_in").toString();
         const QString checkOut = row.value("check_out").toString();
-        if (!QTime::fromString(checkIn, "hh:mm").isValid()
-            && !QTime::fromString(checkOut, "hh:mm").isValid()) {
-            continue;
-        }
+        if (!isImportableRow(row)) continue;
 
-        AttendanceStorage::upsertCheckTimes(date, checkIn, checkOut);
+        if (!isNoteOnlyRow(row)) AttendanceStorage::upsertCheckTimes(date, checkIn, checkOut);
         AttendanceRecord record = AttendanceStorage::loadRecord(date);
+        if (isNoteOnlyRow(row)) {
+            record.arrivalTime = QTime();
+            record.departureTime = QTime();
+        }
         if (row.value("note").isString()) record.note = row.value("note").toString();
         if (row.value("needAverageCal").isBool()) record.needAverageCal = row.value("needAverageCal").toBool();
         if (row.value("excludeStandardOvertime").isBool()) record.excludeStandardOvertime = row.value("excludeStandardOvertime").toBool();

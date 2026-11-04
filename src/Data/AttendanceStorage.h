@@ -17,6 +17,7 @@ public:
     static void saveRecord(const QDate& date, const AttendanceRecord& record);
     static void deleteRecord(const QDate& date);
 
+    // Tests for a saved date, including dates with only a note.
     static bool hasArrivalRecord(const QDate& date);
     static QStringList recordedDates();
     static QByteArray createBackup(QString& errorMessage);

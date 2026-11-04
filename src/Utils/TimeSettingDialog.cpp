@@ -190,10 +190,12 @@ AttendanceRecord TimeSettingDialog::getRecord() const
 {
     AttendanceRecord record = m_loadedRecord;
     record.needAverageCal = m_needAverageCalCheckBox->getIsToggled();
-    record.arrivalTime = m_arrivalTimeEdit->time();
-    record.departureTime = m_departureTimeEdit->time();
+    record.arrivalTime = m_recordTimeToggle->getIsToggled() ? m_arrivalTimeEdit->time() : QTime();
+    record.departureTime = m_recordTimeToggle->getIsToggled() ? m_departureTimeEdit->time() : QTime();
     record.note = m_noteEdit->toPlainText().trimmed();
     record.excludeStandardOvertime = m_excludeStandardOvertime->getIsToggled();
+    // Disabled schedule controls must not save unfinished edits in note-only mode.
+    if (!record.hasWorkTimes()) return record;
     record.hasCustomSchedule = m_customScheduleToggle->getIsToggled();
     if (record.hasCustomSchedule) {
         record.customSchedule.workStartTime = m_scheduleTimes[0]->time();
@@ -222,18 +224,26 @@ void TimeSettingDialog::calculateWorkTime()
 
 void TimeSettingDialog::saveAndClose()
 {
-    if (getRecord().hasCustomSchedule && !isValidWorkSchedule(getRecord().customSchedule)) {
+    const AttendanceRecord record = getRecord();
+    if (record.hasWorkTimes() && record.hasCustomSchedule && !isValidWorkSchedule(record.customSchedule)) {
         ElaMessageBar::warning(ElaMessageBarType::Top, QStringLiteral("无法保存"),
             QStringLiteral("当天作息的每个时间段结束时间必须晚于开始时间。"), 2000, this, 18);
         return;
     }
-    if (m_arrivalTimeEdit->time() >= m_departureTimeEdit->time()) {
+    if (record.hasWorkTimes() && record.arrivalTime >= record.departureTime) {
         ElaMessageBar::warning(ElaMessageBarType::Top, QStringLiteral("无法保存"),
             QStringLiteral("离岗时间必须晚于到岗时间。"), 2000, this, 18);
         return;
     }
 
     accept();
+}
+
+void TimeSettingDialog::updateRecordMode()
+{
+    const bool enabled = m_recordTimeToggle->getIsToggled();
+    for (auto* section : m_workTimeSections) section->setEnabled(enabled);
+    calculateWorkTime();
 }
 
 void TimeSettingDialog::setupUI()
@@ -272,21 +282,29 @@ void TimeSettingDialog::setupUI()
     recordLayout->setVerticalSpacing(9);
     recordLayout->setLabelAlignment(Qt::AlignRight | Qt::AlignVCenter);
 
+    m_recordTimeToggle = new ElaToggleSwitch(recordGroup);
+    m_recordTimeToggle->setObjectName("recordWorkTimesToggle");
+    m_recordTimeToggle->setToolTip(QStringLiteral("关闭后可只保存备注，不计入工作天数、工时和餐补统计。"));
+    recordLayout->addRow(QStringLiteral("记录上下班时间"), m_recordTimeToggle);
+
     m_arrivalTimeEdit = new QTimeEdit(recordGroup);
     m_arrivalTimeEdit->setObjectName("arrivalTimeEditor");
     m_arrivalTimeEdit->setDisplayFormat(QStringLiteral("HH:mm"));
     m_arrivalTimeEdit->setButtonSymbols(QAbstractSpinBox::NoButtons);
     m_arrivalTimeEdit->setFixedHeight(34);
-    recordLayout->addRow(QStringLiteral("到岗时间"), createTimeEditorRow(m_arrivalTimeEdit, recordGroup));
+    m_workTimeSections[0] = createTimeEditorRow(m_arrivalTimeEdit, recordGroup);
+    recordLayout->addRow(QStringLiteral("到岗时间"), m_workTimeSections[0]);
 
     m_departureTimeEdit = new QTimeEdit(recordGroup);
     m_departureTimeEdit->setObjectName("departureTimeEditor");
     m_departureTimeEdit->setDisplayFormat(QStringLiteral("HH:mm"));
     m_departureTimeEdit->setButtonSymbols(QAbstractSpinBox::NoButtons);
     m_departureTimeEdit->setFixedHeight(34);
-    recordLayout->addRow(QStringLiteral("离岗时间"), createTimeEditorRow(m_departureTimeEdit, recordGroup));
+    m_workTimeSections[1] = createTimeEditorRow(m_departureTimeEdit, recordGroup);
+    recordLayout->addRow(QStringLiteral("离岗时间"), m_workTimeSections[1]);
 
     auto* statisticsRow = new QWidget(recordGroup);
+    m_workTimeSections[2] = statisticsRow;
     auto* statisticsLayout = new QHBoxLayout(statisticsRow);
     statisticsLayout->setContentsMargins(0, 0, 0, 0);
     statisticsLayout->setSpacing(9);
@@ -328,6 +346,7 @@ void TimeSettingDialog::setupUI()
     m_contentLayout->addWidget(recordGroup);
 
     auto* scheduleGroup = new ElaGroupBox(QStringLiteral("当日作息"), this);
+    m_workTimeSections[3] = scheduleGroup;
     scheduleGroup->setStyleSheet(dialogGroupStyle());
     auto* scheduleLayout = new QVBoxLayout(scheduleGroup);
     scheduleLayout->setContentsMargins(16, 21, 16, 14);
@@ -383,6 +402,7 @@ void TimeSettingDialog::setupUI()
     m_contentLayout->addWidget(scheduleGroup);
 
     auto* resultGroup = new ElaGroupBox(QStringLiteral("自动计算"), this);
+    m_workTimeSections[4] = resultGroup;
     resultGroup->setStyleSheet(dialogGroupStyle());
     auto* resultLayout = new QVBoxLayout(resultGroup);
     resultLayout->setContentsMargins(16, 21, 16, 14);
@@ -441,6 +461,7 @@ void TimeSettingDialog::setupUI()
     mainLayout->addWidget(m_actions);
 
     connect(m_arrivalTimeEdit, &QTimeEdit::timeChanged, this, &TimeSettingDialog::calculateWorkTime);
+    connect(m_recordTimeToggle, &ElaToggleSwitch::toggled, this, &TimeSettingDialog::updateRecordMode);
     connect(m_departureTimeEdit, &QTimeEdit::timeChanged, this, &TimeSettingDialog::calculateWorkTime);
     connect(m_needAverageCalCheckBox, &ElaToggleSwitch::toggled, this, [this, exclusionLabel](bool enabled) {
         m_excludeStandardOvertime->setEnabled(!enabled);
@@ -537,10 +558,11 @@ void TimeSettingDialog::loadRecord()
     m_excludeStandardOvertime->setIsToggled(record.excludeStandardOvertime);
     m_excludeStandardOvertime->setEnabled(!record.needAverageCal);
     m_needAverageCalCheckBox->setIsToggled(record.needAverageCal);
-    m_arrivalTimeEdit->setTime(record.arrivalTime);
-    m_departureTimeEdit->setTime(record.departureTime);
+    m_arrivalTimeEdit->setTime(record.arrivalTime.isValid() ? record.arrivalTime : m_schedule.workStartTime);
+    m_departureTimeEdit->setTime(record.departureTime.isValid() ? record.departureTime : m_schedule.workEndTime);
     m_noteEdit->setPlainText(record.note);
-    calculateWorkTime();
+    m_recordTimeToggle->setIsToggled(record.hasWorkTimes());
+    updateRecordMode();
     m_loadingRecord = false;
     updateDialogSize(false);
 }

@@ -8,6 +8,7 @@
 #include <ElaPushButton.h>
 #include <ElaScrollArea.h>
 #include <ElaToggleSwitch.h>
+#include <ElaPlainTextEdit.h>
 #include <QFile>
 #include <QAbstractButton>
 #include <QMessageBox>
@@ -250,6 +251,102 @@ private slots:
         QVERIFY(!exclusion->isEnabled());
         const auto capture = qEnvironmentVariable("ATTENDANCE_DIALOG_CAPTURE");
         if (!capture.isEmpty()) dialog.grab().save(capture);
+    }
+    void blankDateCanSaveNoteAndUndoRedo() {
+        auto& window = *m_window;
+        const QDate date(2026,10,3);
+        window.m_calendar->setCurrentPage(2026,10);
+        const QString note = QStringLiteral("休息日，只记备注 🙂");
+        bool edited = false;
+        QTimer::singleShot(150, [&] {
+            auto* dialog = qobject_cast<TimeSettingDialog*>(QApplication::activeModalWidget());
+            if (!dialog) return;
+            QVERIFY(dialog->m_recordTimeToggle->getIsToggled());
+            dialog->m_arrivalTimeEdit->setTime(QTime(20,0));
+            dialog->m_departureTimeEdit->setTime(QTime(10,0));
+            dialog->m_customScheduleToggle->setIsToggled(true);
+            dialog->m_scheduleTimes[0]->setTime(QTime(20,0));
+            dialog->m_scheduleTimes[1]->setTime(QTime(10,0));
+            dialog->m_recordTimeToggle->setIsToggled(false);
+            QVERIFY(!dialog->m_arrivalTimeEdit->isEnabled());
+            QVERIFY(!dialog->m_customScheduleToggle->isEnabled());
+            QVERIFY(dialog->m_noteEdit->isEnabled());
+            dialog->m_noteEdit->setPlainText(note);
+            edited = true;
+            dialog->saveAndClose();
+        });
+        window.onDateDoubleClicked(date);
+        QVERIFY(edited);
+        const auto saved = AttendanceStorage::loadRecord(date);
+        QVERIFY(!saved.hasWorkTimes());
+        QVERIFY(!saved.hasCustomSchedule);
+        QCOMPARE(saved.note, note);
+        QCOMPARE(window.m_undoStack.size(), 1);
+        auto* calendar = window.m_calendar;
+        QVERIFY(calendar->m_data.value(date).value("hasNote").toBool());
+        QVERIFY(!calendar->m_data.value(date).value("hasWorkTimes").toBool());
+        QCOMPARE(calendar->m_data.value(date).value("note").toString(), note);
+        QVERIFY(!calendar->m_dayBackgrounds.contains(date));
+        calendar->clearSelection();
+        QTest::qWait(50);
+        const int offset = calendar->firstVisibleDate().daysTo(date);
+        const QRect cell = calendar->cellRect(offset / 7, offset % 7);
+        QTest::mouseMove(calendar, cell.center());
+        calendar->updateHoveredDate(cell.center());
+        auto* tip = calendar->findChild<QWidget*>("calendarNoteTip");
+        QVERIFY(tip);
+        QTRY_VERIFY(tip->isVisible());
+        QCOMPARE(tip->findChild<QLabel*>()->text(), note);
+        const auto capture = qEnvironmentVariable("ATTENDANCE_NOTE_ONLY_CAPTURE");
+        if (!capture.isEmpty()) window.grab().save(capture + "-calendar.png");
+        const auto history = window.m_undoStack.last();
+        QVERIFY(window.applyHistoryEntry(history, false));
+        QVERIFY(!AttendanceStorage::hasArrivalRecord(date));
+        QVERIFY(window.applyHistoryEntry(history, true));
+        QVERIFY(!AttendanceStorage::loadRecord(date).hasWorkTimes());
+        QCOMPARE(AttendanceStorage::loadRecord(date).note, note);
+        TimeSettingDialog reopened(date, WorkSchedule{}, &window);
+        reopened.setAttribute(Qt::WA_DontShowOnScreen);
+        reopened.show();
+        QVERIFY(!reopened.m_recordTimeToggle->getIsToggled());
+        QCOMPARE(reopened.m_noteEdit->toPlainText(), note);
+        QVERIFY(reopened.findChild<ElaPushButton*>("deleteRecordButton")->isVisible());
+        if (!capture.isEmpty()) reopened.grab().save(capture + "-editor.png");
+        reopened.m_recordTimeToggle->setIsToggled(true);
+        QVERIFY(reopened.m_arrivalTimeEdit->isEnabled());
+        QVERIFY(reopened.getRecord().hasWorkTimes());
+        QCOMPARE(reopened.getRecord().note, note);
+    }
+    void noteOnlyCopyAndDeleteRemainUndoable() {
+        auto& window = *m_window;
+        const QDate date(2026,10,3);
+        AttendanceRecord note;
+        note.arrivalTime = QTime();
+        note.departureTime = QTime();
+        note.note = QStringLiteral("备注复制");
+        AttendanceStorage::saveRecord(date, note);
+        window.m_calendar->setCurrentPage(2026,10);
+        window.m_calendar->setYearOverviewVisible(false);
+        window.copyRecord(date);
+        window.m_calendar->setSelectedDates({date.addDays(1)});
+        window.onApplyCopiedClicked();
+        const auto copied = AttendanceStorage::loadRecord(date.addDays(1));
+        QVERIFY(!copied.hasWorkTimes());
+        QCOMPARE(copied.note, note.note);
+        const auto copyHistory = window.m_undoStack.last();
+        QVERIFY(window.applyHistoryEntry(copyHistory, false));
+        QVERIFY(!AttendanceStorage::hasArrivalRecord(date.addDays(1)));
+        QVERIFY(window.applyHistoryEntry(copyHistory, true));
+        QTimer::singleShot(150, [] {
+            for (auto* widget : QApplication::topLevelWidgets()) {
+                if (auto* box = qobject_cast<QMessageBox*>(widget)) box->button(QMessageBox::Yes)->click();
+            }
+        });
+        window.deleteAttendanceRecords({date});
+        QVERIFY(!AttendanceStorage::hasArrivalRecord(date));
+        QVERIFY(window.applyHistoryEntry(window.m_undoStack.last(), false));
+        QVERIFY(!AttendanceStorage::loadRecord(date).hasWorkTimes());
+        QCOMPARE(AttendanceStorage::loadRecord(date).note, note.note);
     }
     void editorInitiallyCentersOnParent_data() {
         QTest::addColumn<int>("parentPosition");

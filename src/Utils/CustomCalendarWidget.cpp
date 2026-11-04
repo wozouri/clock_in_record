@@ -503,7 +503,8 @@ void CustomCalendarWidget::paintEvent(QPaintEvent* event)
             const bool contextMenuTarget = m_contextMenuDates.contains(date);
             const bool hovered = m_hoveredDate == date;
             const QVariantMap dayData = m_data.value(date);
-            const bool hasRecord = !dayData.isEmpty();
+            const bool hasRecord = !dayData.isEmpty()
+                && dayData.value(QStringLiteral("hasWorkTimes"), true).toBool();
 
             if (m_gridVisible) {
                 painter.setPen(QColor(QStringLiteral("#e5ebf1")));

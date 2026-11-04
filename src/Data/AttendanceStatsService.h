@@ -7,6 +7,7 @@
 
 struct AttendanceDayView {
     bool hasRecord = false;
+    bool hasWorkTimes = false;
     bool needAverageCal = true;
     QString arrivalText;
     QString departureText;

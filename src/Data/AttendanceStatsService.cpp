@@ -48,27 +48,24 @@ MonthlyAttendanceSnapshot AttendanceStatsService::buildMonthlySnapshot(int year,
             const WorkTimeResult result = WorkTimeCalculator::calculateWorkTimeResult(record, schedule);
 
             dayView.needAverageCal = record.needAverageCal;
+            dayView.hasWorkTimes = record.hasWorkTimes();
             dayView.arrivalText = record.arrivalTime.toString("hh:mm");
             dayView.departureText = record.departureTime.toString("hh:mm");
             dayView.hasNote = !record.note.trimmed().isEmpty();
             dayView.hasCustomSchedule = record.hasCustomSchedule;
             dayView.note = record.note.trimmed();
-            dayView.hasMealAllowance = record.departureTime >= (record.hasCustomSchedule
+            dayView.hasMealAllowance = record.hasWorkTimes() && record.departureTime >= (record.hasCustomSchedule
                 ? record.customSchedule.mealAllowanceTime : schedule.mealAllowanceTime);
 
-            snapshot.workDays++;
-            if (!record.needAverageCal) {
-                snapshot.workDays--;
+            if (record.hasWorkTimes()) {
+                if (record.needAverageCal) ++snapshot.workDays;
+                if (result.overtimeMinutes > 0) {
+                    snapshot.totalOvertimeMinutes += result.overtimeMinutes;
+                }
+                if (dayView.hasMealAllowance) ++snapshot.mealAllowanceCount;
+                snapshot.totalLateMinutes += result.lateMinutes;
+                snapshot.totalEarlyLeaveMinutes += result.earlyLeaveMinutes;
             }
-
-            if (result.overtimeMinutes > 0) {
-                snapshot.totalOvertimeMinutes += result.overtimeMinutes;
-            }
-            if (dayView.hasMealAllowance) {
-                snapshot.mealAllowanceCount++;
-            }
-            snapshot.totalLateMinutes += result.lateMinutes;
-            snapshot.totalEarlyLeaveMinutes += result.earlyLeaveMinutes;
         }
 
         snapshot.dayViews.insert(date, dayView);

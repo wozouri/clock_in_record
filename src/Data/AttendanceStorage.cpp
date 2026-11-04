@@ -131,8 +131,8 @@ bool writeRecord(QSqlDatabase database, const QDate& date, const AttendanceRecor
         "exclude_standard_overtime = excluded.exclude_standard_overtime, custom_schedule = excluded.custom_schedule");
     query.addBindValue(date.toString("yyyy-MM-dd"));
     query.addBindValue(record.needAverageCal);
-    query.addBindValue(record.arrivalTime.toString(kTimeFormat));
-    query.addBindValue(record.departureTime.toString(kTimeFormat));
+    query.addBindValue(record.arrivalTime.isValid() ? record.arrivalTime.toString(kTimeFormat) : QStringLiteral(""));
+    query.addBindValue(record.departureTime.isValid() ? record.departureTime.toString(kTimeFormat) : QStringLiteral(""));
     query.addBindValue(record.note.isNull() ? QStringLiteral("") : record.note);
     query.addBindValue(record.excludeStandardOvertime);
     const QString customJson = recordScheduleJson(record);
@@ -420,8 +420,8 @@ AttendanceRecord AttendanceStorage::loadRecord(const QDate& date)
     }
 
     record.needAverageCal = query.value(0).toBool();
-    record.arrivalTime = readTime(query.value(1).toString(), record.arrivalTime);
-    record.departureTime = readTime(query.value(2).toString(), record.departureTime);
+    record.arrivalTime = QTime::fromString(query.value(1).toString(), kTimeFormat);
+    record.departureTime = QTime::fromString(query.value(2).toString(), kTimeFormat);
     record.note = query.value(3).toString();
     record.excludeStandardOvertime = query.value(4).toBool();
     record.customScheduleJson = query.value(5).toString();
@@ -493,6 +493,10 @@ QStringList AttendanceStorage::recordedDates()
 void AttendanceStorage::upsertCheckTimes(const QDate& date, const QString& checkIn, const QString& checkOut)
 {
     AttendanceRecord record = loadRecord(date);
+    if (!record.hasWorkTimes()) {
+        record.arrivalTime = AttendanceRecord{}.arrivalTime;
+        record.departureTime = AttendanceRecord{}.departureTime;
+    }
     const QTime arrival = QTime::fromString(checkIn, kTimeFormat);
     const QTime departure = QTime::fromString(checkOut, kTimeFormat);
     if (arrival.isValid()) {

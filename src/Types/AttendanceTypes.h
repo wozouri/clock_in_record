@@ -25,6 +25,9 @@ struct AttendanceRecord {
     bool hasCustomSchedule = false;
     WorkSchedule customSchedule;
     QString customScheduleJson;
+
+    // Empty times represent a date with only a note, without attendance.
+    bool hasWorkTimes() const { return arrivalTime.isValid() && departureTime.isValid(); }
 };
 
 struct WorkTimeResult {

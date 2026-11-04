@@ -143,6 +143,112 @@ private slots:
         QVERIFY(!AttendanceJsonService::importFromLarkJson(file.fileName()).success);
         QVERIFY(AttendanceStorage::recordedDates().isEmpty());
     }
+    void noteOnlyDatesPersistWithoutAffectingStatistics() {
+        const QDate date(2026,10,3);
+        AttendanceRecord note;
+        note.arrivalTime = QTime();
+        note.departureTime = QTime();
+        note.note = QStringLiteral("休假，陪家人 🙂");
+        AttendanceStorage::saveRecord(date, note);
+        QVERIFY(AttendanceStorage::hasArrivalRecord(date));
+        const auto loaded = AttendanceStorage::loadRecord(date);
+        QVERIFY(!loaded.arrivalTime.isValid() && !loaded.departureTime.isValid());
+        QCOMPARE(loaded.note, note.note);
+        const auto result = WorkTimeCalculator::calculateWorkTimeResult(loaded, WorkSchedule{});
+        QCOMPARE(result.actualWorkMinutes, 0);
+        QCOMPARE(result.standardWorkMinutes, 0);
+        QCOMPARE(result.overtimeMinutes, 0);
+        QCOMPARE(result.lateMinutes, 0);
+        QCOMPARE(result.earlyLeaveMinutes, 0);
+        const auto empty = AttendanceStatsService::buildMonthlySnapshot(2026,10);
+        QCOMPARE(empty.workDays, 0);
+        QCOMPARE(empty.mealAllowanceCount, 0);
+        QVERIFY(empty.dayViews.value(date).hasRecord);
+        QVERIFY(empty.dayViews.value(date).hasNote);
+        QVERIFY(!empty.dayViews.value(date).hasWorkTimes);
+        QVERIFY(empty.dayViews.value(date).arrivalText.isEmpty());
+        QCOMPARE(empty.dayViews.value(date).note, note.note);
+
+        AttendanceRecord work;
+        work.departureTime = QTime(21,0);
+        AttendanceStorage::saveRecord(date.addDays(1), work);
+        const auto month = AttendanceStatsService::buildMonthlySnapshot(2026,10);
+        QCOMPARE(month.workDays, 1);
+        QCOMPARE(month.totalOvertimeMinutes, 150);
+        QCOMPARE(month.mealAllowanceCount, 1);
+        QCOMPARE(month.totalLateMinutes, 0);
+        QCOMPARE(month.totalEarlyLeaveMinutes, 0);
+
+        QTemporaryDir directory;
+        QString error;
+        QFile backup(directory.filePath("backup.db"));
+        const auto bytes = AttendanceStorage::createBackup(error);
+        QVERIFY2(error.isEmpty(), qPrintable(error));
+        QVERIFY(backup.open(QIODevice::WriteOnly));
+        QCOMPARE(backup.write(bytes), qint64(bytes.size()));
+        backup.close();
+        auto snapshot = QSqlDatabase::addDatabase("QSQLITE", "note-backup");
+        snapshot.setDatabaseName(backup.fileName());
+        QVERIFY(snapshot.open());
+        {
+            QSqlQuery query(snapshot);
+            QVERIFY(query.exec("SELECT arrival_time, departure_time, note FROM records WHERE record_date='2026-10-03'"));
+            QVERIFY(query.next());
+            QCOMPARE(query.value(0).toString(), QStringLiteral(""));
+            QCOMPARE(query.value(1).toString(), QStringLiteral(""));
+            QCOMPARE(query.value(2).toString(), note.note);
+        }
+        snapshot.close();
+        snapshot = QSqlDatabase();
+        QSqlDatabase::removeDatabase("note-backup");
+    }
+    void noteOnlyJsonRoundtripCanReplaceAttendance() {
+        QTemporaryDir directory;
+        const QDate date(2026,10,3);
+        AttendanceRecord note;
+        note.arrivalTime = QTime();
+        note.departureTime = QTime();
+        note.note = QStringLiteral("只记备注\n支持多行 🙂");
+        AttendanceStorage::saveRecord(date, note);
+        const QString path = directory.filePath("notes.json");
+        const auto exported = AttendanceJsonService::exportToJson(path);
+        QVERIFY(exported.success);
+        QCOMPARE(exported.exportedCount, 1);
+        AttendanceStorage::saveRecord(date, AttendanceRecord{});
+        const auto preview = AttendanceJsonService::previewImport(path);
+        QVERIFY(preview.success);
+        QCOMPARE(preview.dates, QList<QDate>{date});
+        QCOMPARE(preview.overwrittenCount, 1);
+        QVERIFY(AttendanceStorage::loadRecord(date).hasWorkTimes());
+        const auto imported = AttendanceJsonService::importFromLarkJson(path);
+        QVERIFY(imported.success);
+        QCOMPARE(imported.importedCount, 1);
+        QVERIFY(!AttendanceStorage::loadRecord(date).hasWorkTimes());
+        QCOMPARE(AttendanceStorage::loadRecord(date).note, note.note);
+        AttendanceStorage::deleteRecord(date);
+        QCOMPARE(AttendanceJsonService::importFromLarkJson(path).importedCount, 1);
+        QVERIFY(!AttendanceStorage::loadRecord(date).hasWorkTimes());
+        QCOMPARE(AttendanceStorage::loadRecord(date).note, note.note);
+    }
+    void noteImportAndLaterCheckTimesPreserveNote() {
+        QTemporaryDir directory;
+        QFile file(directory.filePath("notes.json"));
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        file.write("[{\"date\":\"2026-10-3\",\"note\":\"holiday\"},{\"date\":\"2026-10-4\",\"check_in\":\"wrong\",\"note\":\"invalid\"}]");
+        file.close();
+        const auto imported = AttendanceJsonService::importFromLarkJson(file.fileName());
+        QVERIFY(imported.success);
+        QCOMPARE(imported.importedCount, 1);
+        const QDate date(2026,10,3);
+        QVERIFY(!AttendanceStorage::loadRecord(date).hasWorkTimes());
+        QVERIFY(!AttendanceStorage::hasArrivalRecord(date.addDays(1)));
+        AttendanceStorage::upsertCheckTimes(date, "08:45", "");
+        const auto record = AttendanceStorage::loadRecord(date);
+        QCOMPARE(record.note, QStringLiteral("holiday"));
+        QCOMPARE(record.arrivalTime, QTime(8,45));
+        QCOMPARE(record.departureTime, QTime(18,0));
+        QCOMPARE(AttendanceStatsService::buildMonthlySnapshot(2026,10).workDays, 1);
+    }
     void emptyNotesAndUnknownScheduleFieldsRoundtrip() {
         QTemporaryDir directory;
         const QDate date(2026,10,3);

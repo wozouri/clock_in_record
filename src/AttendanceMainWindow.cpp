@@ -69,6 +69,7 @@ bool recordsEqual(const AttendanceRecord& lhs, const AttendanceRecord& rhs) {
 }
 
 QString recordSummaryHtml(const AttendanceRecord& record) {
+    if (!record.hasWorkTimes()) return QStringLiteral("仅备注");
     const QString workdayMarker = record.needAverageCal
         ? QStringLiteral("<span style='font-size:16px; font-weight:600; color:#238653;'>&#10003;</span>")
         : QStringLiteral("<span style='font-size:16px; font-weight:600; color:#94a3b8;'>&#9675;</span>");
@@ -83,6 +84,8 @@ QString recordSummaryHtml(const AttendanceRecord& record) {
 }
 
 QString recordTipSummary(const QDate& date, const AttendanceRecord& record) {
+    if (!record.hasWorkTimes())
+        return QStringLiteral("%1    仅备注").arg(date.toString(QStringLiteral("yyyy.M.d")));
     const QString workdayMarker = record.needAverageCal
         ? QStringLiteral("工作日")
         : QStringLiteral("非工作日");
@@ -1430,7 +1433,7 @@ void AttendanceMainWindow::updateCalendarAppearance(const MonthlyAttendanceSnaps
         const AttendanceDayView& dayView = it.value();
         m_renderedCalendarDates.append(date);
 
-        if (dayView.hasRecord) {
+        if (dayView.hasWorkTimes) {
             // 有打卡记录，显示绿色背景
             QTextCharFormat format;
             QColor defaultCol(144, 238, 144); // 浅绿色
@@ -1456,6 +1459,7 @@ void AttendanceMainWindow::updateMonthlyStatistics(const MonthlyAttendanceSnapsh
 
         if (dayView.hasRecord) {
             QVariantMap info;
+            info["hasWorkTimes"] = dayView.hasWorkTimes;
             info["arrivalTime"] = dayView.arrivalText;
             info["departureTime"] = dayView.departureText;
             info["hasMealAllowance"] = snapshot.showMealAllowanceMarker

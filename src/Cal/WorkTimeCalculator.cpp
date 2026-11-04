@@ -22,7 +22,7 @@ WorkTimeResult WorkTimeCalculator::calculateWorkTimeResult(
 {
     const WorkSchedule& schedule = record.hasCustomSchedule ? record.customSchedule : globalSchedule;
     WorkTimeResult result;
-    if (record.arrivalTime >= record.departureTime
+    if (!record.hasWorkTimes() || record.arrivalTime >= record.departureTime
         || schedule.workStartTime >= schedule.workEndTime) {
         return result;
     }

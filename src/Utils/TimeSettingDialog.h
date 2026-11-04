@@ -35,6 +35,7 @@ private:
     friend class LegacyUiTests;
     void setupUI();
     void loadRecord();
+    void updateRecordMode();
     void updateDialogSize(bool animate);
     QRect contentGeometry(const QRect& available) const;
 
@@ -58,6 +59,8 @@ private:
     QWidget* m_customScheduleBody = nullptr;
     QTimeEdit* m_scheduleTimes[7] = {};
     ElaToggleSwitch* m_needAverageCalCheckBox = nullptr;
+    ElaToggleSwitch* m_recordTimeToggle = nullptr;
+    QWidget* m_workTimeSections[5] = {};
     QTimeEdit* m_arrivalTimeEdit = nullptr;
     QTimeEdit* m_departureTimeEdit = nullptr;
     ElaIconButton* m_noteEmojiButton = nullptr;
