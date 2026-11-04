@@ -1,4 +1,5 @@
 #include "TimeSettingDialog.h"
+#include "TimeInputEdit.h"
 
 #include "Data/AttendanceStorage.h"
 #include "Data/WorkScheduleCodec.h"
@@ -287,7 +288,7 @@ void TimeSettingDialog::setupUI()
     m_recordTimeToggle->setToolTip(QStringLiteral("关闭后可只保存备注，不计入工作天数、工时和餐补统计。"));
     recordLayout->addRow(QStringLiteral("记录上下班时间"), m_recordTimeToggle);
 
-    m_arrivalTimeEdit = new QTimeEdit(recordGroup);
+    m_arrivalTimeEdit = new TimeInputEdit(recordGroup);
     m_arrivalTimeEdit->setObjectName("arrivalTimeEditor");
     m_arrivalTimeEdit->setDisplayFormat(QStringLiteral("HH:mm"));
     m_arrivalTimeEdit->setButtonSymbols(QAbstractSpinBox::NoButtons);
@@ -295,7 +296,7 @@ void TimeSettingDialog::setupUI()
     m_workTimeSections[0] = createTimeEditorRow(m_arrivalTimeEdit, recordGroup);
     recordLayout->addRow(QStringLiteral("到岗时间"), m_workTimeSections[0]);
 
-    m_departureTimeEdit = new QTimeEdit(recordGroup);
+    m_departureTimeEdit = new TimeInputEdit(recordGroup);
     m_departureTimeEdit->setObjectName("departureTimeEditor");
     m_departureTimeEdit->setDisplayFormat(QStringLiteral("HH:mm"));
     m_departureTimeEdit->setButtonSymbols(QAbstractSpinBox::NoButtons);
@@ -372,7 +373,7 @@ void TimeSettingDialog::setupUI()
     const QStringList labels{QStringLiteral("上班"), QStringLiteral("下班"), QStringLiteral("午休开始"),
         QStringLiteral("午休结束"), QStringLiteral("晚餐开始"), QStringLiteral("晚餐结束"), QStringLiteral("餐补起算")};
     for (int i = 0; i < 7; ++i) {
-        m_scheduleTimes[i] = new QTimeEdit(m_customScheduleBody);
+        m_scheduleTimes[i] = new TimeInputEdit(m_customScheduleBody);
         m_scheduleTimes[i]->setObjectName(QStringLiteral("customScheduleTime%1").arg(i));
         m_scheduleTimes[i]->setDisplayFormat("HH:mm");
         m_scheduleTimes[i]->setButtonSymbols(QAbstractSpinBox::NoButtons);

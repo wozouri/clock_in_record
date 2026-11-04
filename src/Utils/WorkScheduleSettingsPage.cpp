@@ -1,4 +1,5 @@
 #include "WorkScheduleSettingsPage.h"
+#include "TimeInputEdit.h"
 #include <ElaScrollArea.h>
 #include <QSignalBlocker>
 
@@ -481,7 +482,7 @@ void WorkScheduleSettingsPage::updateToggleChangeState(ElaToggleSwitch* toggle,
 
 QTimeEdit* WorkScheduleSettingsPage::createTimeEdit()
 {
-    auto* editor = new QTimeEdit(this);
+    auto* editor = new TimeInputEdit(this);
     editor->setDisplayFormat(QStringLiteral("HH:mm"));
     editor->setButtonSymbols(QAbstractSpinBox::NoButtons);
     editor->setMinimumWidth(104);

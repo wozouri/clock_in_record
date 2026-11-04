@@ -4,6 +4,8 @@
 #include "Data/WorkScheduleCodec.h"
 #include "Utils/TimeSettingDialog.h"
 #include "Utils/CustomCalendarWidget.h"
+#include "Utils/WorkScheduleSettingsPage.h"
+#include "Utils/TimeInputEdit.h"
 #include <ElaApplication.h>
 #include <ElaPushButton.h>
 #include <ElaScrollArea.h>
@@ -31,6 +33,10 @@
 #include <QFontMetrics>
 #include "Utils/ScreenLayout.h"
 #include <QWindow>
+#include <QWheelEvent>
+#include <QClipboard>
+#include <QFocusEvent>
+#include <QLineEdit>
 #include <ElaIconButton.h>
 #ifdef Q_OS_WIN
 #include <Windows.h>
@@ -79,6 +85,187 @@ private slots:
         AttendanceStorage::saveWorkSchedule(WorkSchedule{});
         m_window->m_undoStack.clear();
         m_window->m_redoStack.clear();
+    }
+    void timeEditorsWrapSelectedSectionWithKeyboardAndWheel() {
+        TimeSettingDialog dialog(QDate(2026,10,10), WorkSchedule{});
+        dialog.m_customScheduleToggle->setIsToggled(true);
+        WorkScheduleSettingsPage settings;
+        settings.setWorkSchedule(WorkSchedule{});
+        const auto recordEditors = dialog.findChildren<QTimeEdit*>();
+        const auto scheduleEditors = settings.findChildren<QTimeEdit*>();
+        QCOMPARE(recordEditors.size(), 9);
+        QCOMPARE(scheduleEditors.size(), 7);
+        for (auto* editor : recordEditors + scheduleEditors) {
+            QVERIFY(editor->isEnabled());
+            editor->setTime(QTime(9,0));
+            editor->setCurrentSection(QDateTimeEdit::MinuteSection);
+            QTest::keyClick(editor, Qt::Key_Down);
+            QCOMPARE(editor->time(), QTime(9,59));
+            QTest::keyClick(editor, Qt::Key_Up);
+            QCOMPARE(editor->time(), QTime(9,0));
+
+            editor->setTime(QTime(0,30));
+            editor->setCurrentSection(QDateTimeEdit::HourSection);
+            QTest::keyClick(editor, Qt::Key_Down);
+            QCOMPARE(editor->time(), QTime(23,30));
+            QTest::keyClick(editor, Qt::Key_Up);
+            QCOMPARE(editor->time(), QTime(0,30));
+
+            editor->setTime(QTime(0,0));
+            editor->setCurrentSection(QDateTimeEdit::MinuteSection);
+            const QPointF position(editor->rect().center());
+            const QPointF globalPosition(editor->mapToGlobal(position.toPoint()));
+            QWheelEvent down(position, globalPosition, QPoint(), QPoint(0,-120),
+                Qt::NoButton, Qt::NoModifier, Qt::NoScrollPhase, false);
+            QApplication::sendEvent(editor, &down);
+            QCOMPARE(editor->time(), QTime(0,59));
+            QWheelEvent up(position, globalPosition, QPoint(), QPoint(0,120),
+                Qt::NoButton, Qt::NoModifier, Qt::NoScrollPhase, false);
+            QApplication::sendEvent(editor, &up);
+            QCOMPARE(editor->time(), QTime(0,0));
+        }
+    }
+    void selectedWholeTimeAcceptsFormats_data() {
+        QTest::addColumn<QString>("input");
+        QTest::addColumn<QTime>("expected");
+        QTest::addColumn<bool>("paste");
+        for (bool paste : {false, true}) {
+            for (const auto& input : {QStringLiteral("08:59"), QStringLiteral("8:59"),
+                     QStringLiteral("0859"), QStringLiteral("859"), QStringLiteral("8:5")}) {
+                QTest::newRow(qPrintable(input + (paste ? "-paste" : "-typed")))
+                    << input << (input == "8:5" ? QTime(8,5) : QTime(8,59)) << paste;
+            }
+        }
+        QTest::newRow("midnight") << QStringLiteral("0000") << QTime(0,0) << false;
+        QTest::newRow("last-minute") << QStringLiteral("2359") << QTime(23,59) << false;
+        QTest::newRow("full-width-colon") << QStringLiteral(" 8：59 ") << QTime(8,59) << true;
+    }
+    void selectedWholeTimeAcceptsFormats() {
+        QFETCH(QString, input);
+        QFETCH(QTime, expected);
+        QFETCH(bool, paste);
+        // CTest runs these cases again with an isolated offscreen clipboard.
+        if (paste && QGuiApplication::platformName() != "offscreen")
+            QSKIP("Paste is tested by time_input_whole_edit without changing the desktop clipboard");
+        TimeInputEdit editor;
+        editor.setDisplayFormat("HH:mm");
+        editor.setTime(QTime(17,42));
+        editor.selectAll();
+        if (paste) {
+            QApplication::clipboard()->setText(input);
+            QTest::keyClick(&editor, Qt::Key_V, Qt::ControlModifier);
+            QCOMPARE(editor.time(), expected);
+        } else {
+            QTest::keyClicks(&editor, input);
+            // Three digits and a one-digit minute remain editable until confirmed.
+            if (input == "859" || input == "8:5") {
+                QCOMPARE(editor.time(), QTime(17,42));
+                QTest::keyClick(&editor, Qt::Key_Return);
+            }
+            QCOMPARE(editor.time(), expected);
+        }
+        QCOMPARE(editor.text(), expected.toString("HH:mm"));
+    }
+    void invalidWholeTimeCanBeCorrectedOrCancelled() {
+        TimeInputEdit editor;
+        editor.setDisplayFormat("HH:mm");
+        editor.setTime(QTime(8,59));
+        QSignalSpy changes(&editor, &QTimeEdit::timeChanged);
+        for (const auto& input : {QStringLiteral("24:00"), QStringLiteral("12:60"), QStringLiteral("9999")}) {
+            editor.selectAll();
+            QTest::keyClicks(&editor, input);
+            QCOMPARE(editor.time(), QTime(8,59));
+            QFocusEvent leave(QEvent::FocusOut);
+            QApplication::sendEvent(&editor, &leave);
+            QCOMPARE(editor.text(), QStringLiteral("08:59"));
+        }
+        QCOMPARE(changes.count(), 0);
+        editor.selectAll();
+        QTest::keyClicks(&editor, "12:");
+        QTest::keyClick(&editor, Qt::Key_Escape);
+        QCOMPARE(editor.time(), QTime(8,59));
+        QCOMPARE(editor.text(), QStringLiteral("08:59"));
+        editor.selectAll();
+        QTest::keyClicks(&editor, "123");
+        QFocusEvent leave(QEvent::FocusOut);
+        QApplication::sendEvent(&editor, &leave);
+        QCOMPARE(editor.time(), QTime(1,23));
+        QCOMPARE(changes.count(), 1);
+        editor.selectAll();
+        QTest::keyClicks(&editor, "12:60");
+        QTest::keyClick(&editor, Qt::Key_A, Qt::ControlModifier);
+        QTest::keyClicks(&editor, "12:59");
+        QCOMPARE(editor.time(), QTime(12,59));
+    }
+    void allTimeEditorsAcceptWholeTimeAndKeepSectionEditing() {
+        TimeSettingDialog dialog(QDate(2026,10,10), WorkSchedule{});
+        dialog.m_customScheduleToggle->setIsToggled(true);
+        WorkScheduleSettingsPage settings;
+        settings.setWorkSchedule(WorkSchedule{});
+        const auto editors = dialog.findChildren<QTimeEdit*>() + settings.findChildren<QTimeEdit*>();
+        QCOMPARE(editors.size(), 16);
+        for (auto* editor : editors) {
+            editor->setTime(QTime(17,42));
+            QSignalSpy changes(editor, &QTimeEdit::timeChanged);
+            QTest::keyClick(editor, Qt::Key_A, Qt::ControlModifier);
+            QTest::keyClicks(editor, "0859");
+            QCOMPARE(editor->time(), QTime(8,59));
+            QCOMPARE(changes.count(), 1);
+            editor->setSelectedSection(QDateTimeEdit::MinuteSection);
+            QTest::keyClicks(editor, "30");
+            QCOMPARE(editor->time(), QTime(8,30));
+        }
+        QCOMPARE(dialog.getRecord().arrivalTime, QTime(8,30));
+        QCOMPARE(dialog.getRecord().departureTime, QTime(8,30));
+    }
+    void enterInTimeEditorDoesNotSubmitDialog_data() {
+        QTest::addColumn<int>("key");
+        QTest::addColumn<QString>("input");
+        QTest::addColumn<QTime>("expected");
+        for (const int key : {int(Qt::Key_Return), int(Qt::Key_Enter)}) {
+            const QString prefix = key == Qt::Key_Return ? "return-" : "keypad-enter-";
+            QTest::newRow(qPrintable(prefix + "abbreviation"))
+                << key << QStringLiteral("859") << QTime(8,59);
+            QTest::newRow(qPrintable(prefix + "complete"))
+                << key << QStringLiteral("0859") << QTime(8,59);
+            QTest::newRow(qPrintable(prefix + "invalid"))
+                << key << QStringLiteral("25:99") << QTime(9,0);
+        }
+    }
+    void enterInTimeEditorDoesNotSubmitDialog() {
+        QFETCH(int, key);
+        QFETCH(QString, input);
+        QFETCH(QTime, expected);
+        TimeSettingDialog dialog(QDate(2026,11,4), WorkSchedule{}, m_window);
+        ElaPushButton* save = nullptr;
+        for (auto* button : dialog.findChildren<ElaPushButton*>()) {
+            if (button->text() == QStringLiteral("保存")) save = button;
+        }
+        QVERIFY(save);
+        save->setDefault(true);
+        QSignalSpy saveClicks(save, &ElaPushButton::clicked);
+        QSignalSpy finished(&dialog, &QDialog::finished);
+        dialog.show();
+        dialog.activateWindow();
+        auto* editor = dialog.m_arrivalTimeEdit;
+        editor->setFocus();
+        QTRY_VERIFY(editor->hasFocus());
+        editor->selectAll();
+        QTest::keyClicks(QApplication::focusWidget(), input);
+        QTest::keyClick(QApplication::focusWidget(), Qt::Key(key));
+        QCOMPARE(editor->time(), expected);
+        QCOMPARE(editor->text(), expected.toString("HH:mm"));
+        QCOMPARE(saveClicks.count(), 0);
+        QCOMPARE(finished.count(), 0);
+        QVERIFY(dialog.isVisible());
+        // Further Enter presses in the editor must also stay inside the dialog.
+        QTest::keyClick(QApplication::focusWidget(), Qt::Key(key));
+        QCOMPARE(saveClicks.count(), 0);
+        QCOMPARE(finished.count(), 0);
+        QTest::mouseClick(save, Qt::LeftButton);
+        QCOMPARE(saveClicks.count(), 1);
+        QCOMPARE(finished.count(), 1);
+        QCOMPARE(dialog.result(), int(QDialog::Accepted));
     }
     void geometryFitsNonPrimaryWorkAreas_data() {
         QTest::addColumn<QRect>("available");
@@ -665,7 +852,8 @@ private slots:
         calendar->clearSelection();
         const auto capture = qEnvironmentVariable("ATTENDANCE_WINDOW_LAYOUT_CAPTURE");
         if (!capture.isEmpty()) window.grab().save(capture + "-" + QTest::currentDataTag() + ".png");
-        calendar->setCurrentPage(2026,11);
+        const QDate otherMonth = QDate::currentDate().addMonths(1);
+        calendar->setCurrentPage(otherMonth.year(), otherMonth.month());
         MonthlyAttendanceSnapshot snapshot;
         snapshot.workDays = 18;
         snapshot.totalOvertimeMinutes = 2665;
