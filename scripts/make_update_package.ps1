@@ -118,6 +118,9 @@ foreach ($testName in $featureTests) {
 $featureRuns = @(
     [pscustomobject]@{ Name = "stats_tests"; Label = "stats_tests"; Arguments = @() },
     [pscustomobject]@{ Name = "legacy_ui_tests"; Label = "legacy_ui_tests"; Arguments = @("-platform", "windows") },
+    [pscustomobject]@{ Name = "legacy_ui_tests"; Label = "update_ui_tests"; Arguments = @(
+        "-platform", "offscreen", "updateDialogKeepsLongNotesScrollable", "startupChecksForUpdatesAndNotifies"
+    ) },
     [pscustomobject]@{ Name = "legacy_ui_tests"; Label = "time_input_tests"; Arguments = @(
         "-platform", "offscreen", "selectedWholeTimeAcceptsFormats",
         "invalidWholeTimeCanBeCorrectedOrCancelled", "allTimeEditorsAcceptWholeTimeAndKeepSectionEditing",

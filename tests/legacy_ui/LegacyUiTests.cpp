@@ -167,6 +167,13 @@ private slots:
         QTest::newRow("service-error") << QString() << false << 503;
     }
     void startupChecksForUpdatesAndNotifies() {
+        bool dedicatedRun = false;
+        for (const auto& argument : QCoreApplication::arguments()) {
+            if (argument.startsWith(QStringLiteral("startupChecksForUpdatesAndNotifies")))
+                dedicatedRun = true;
+        }
+        if (!dedicatedRun)
+            QSKIP("Startup window lifecycle is tested in a separate process by update_ui");
         QFETCH(QString, version);
         QFETCH(bool, newer);
         QFETCH(int, status);
@@ -577,9 +584,15 @@ private slots:
         window.m_calendar->setCurrentPage(2026,10);
         const QString note = QStringLiteral("休息日，只记备注 🙂");
         bool edited = false;
-        QTimer::singleShot(150, [&] {
-            auto* dialog = qobject_cast<TimeSettingDialog*>(QApplication::activeModalWidget());
-            if (!dialog) return;
+        QTimer editTimer;
+        editTimer.setInterval(50);
+        connect(&editTimer, &QTimer::timeout, &editTimer, [&] {
+            // 原生窗口初始化可能处理定时器事件；等目标窗口显示后再操作，
+            // 避免单次回调过早触发或命中其他窗口，导致 exec 永久等待。
+            auto* dialog = window.findChild<TimeSettingDialog*>();
+            if (!dialog || !dialog->isVisible()) return;
+            editTimer.stop();
+            QTimer::singleShot(2000, dialog, &QDialog::reject);
             QVERIFY(dialog->m_recordTimeToggle->getIsToggled());
             dialog->m_arrivalTimeEdit->setTime(QTime(20,0));
             dialog->m_departureTimeEdit->setTime(QTime(10,0));
@@ -594,6 +607,10 @@ private slots:
             edited = true;
             dialog->saveAndClose();
         });
+        QTimer::singleShot(5000, &editTimer, [&] {
+            if (auto* dialog = window.findChild<TimeSettingDialog*>()) dialog->reject();
+        });
+        editTimer.start();
         window.onDateDoubleClicked(date);
         QVERIFY(edited);
         const auto saved = AttendanceStorage::loadRecord(date);
