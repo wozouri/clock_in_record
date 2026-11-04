@@ -1,4 +1,4 @@
-# Git 维护与提交建议
+# Git 维护与版本管理
 
 ## 分支策略
 
@@ -8,17 +8,27 @@
   - `fix/<name>`
   - `refactor/<name>`
 
+## 发布与版本标签
+
+- 客户端与安装程序采用日期版本号 `vYYYY.MM.DD`。
+- 每次正式发布必须为实际发布提交创建注释标签，并将源码和标签推送到远端；首次发布标签与日期版本号相同。
+- 同日重新发布使用尚未使用的修订标签，如 `v2026.11.04-r1`、`v2026.11.04-r2`，不移动、覆盖或复用已推送的标签。
+- 发布前同步远端并整合已有进度，确认工作区干净、对应回归通过，再从已提交并推送的发布提交构建；上传包或切换清单前核对远端源码及标签。
+- 同日修订保持客户端日期版本号时，已安装同版本的客户端需要重新下载安装程序；更新说明中须明确这一点。
+- 更新日志保存在 `docs/release-YYYY.MM.DD.md`，记录本次改动、修订标签与升级方式；发布完成后报告版本号、分支、提交及远端同步结果。
+- 仅修改文档或仓库管理规则且未发布新包时，无需创建新版本或移动发布标签。
+
 ## 提交信息格式
 
-推荐格式：
+必须使用以下格式：
 
 ```text
-<type>(optional-scope): <subject>
+type(scope): 中文单句描述
 ```
 
 要求：
 
-- `subject` 使用祈使句，控制在 50 字符左右。
+- `scope` 描述改动范围，描述使用简洁的中文单句。
 - 一次提交只做一件事，避免混合 `fix` 和 `refactor`。
 - 需要时补充正文说明 why（动机）而不是重复 what（改动）。
 
@@ -39,14 +49,14 @@
 ## 提交拆分示例
 
 ```text
-fix(calendar): fix departure time display format
-refactor(calendar): remove context menu offset hacks
-chore(main): guard Windows-only console setup
-docs(readme): add build and commit conventions
+fix(calendar): 修复下班时间显示格式
+refactor(calendar): 移除过时的菜单偏移处理
+chore(main): 限制控制台初始化仅在调试构建执行
+docs(release): 补充发布版本与标签规范
 ```
 
 ## 合并前检查
 
-- 本地可编译：`cmake --build out/build/x64-RelWithDebInfo --config RelWithDebInfo`
-- 手工验证核心流程：新增记录、删除记录、导入/导出、月度统计
+- 根据改动运行最小相关验证；正式发布执行发布流程规定的全部回归。
+- 仅修改文档或规则时检查内容与差异，无需编译或运行界面测试。
 - `git status` 保持干净后再合并
