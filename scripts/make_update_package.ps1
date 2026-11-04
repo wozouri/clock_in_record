@@ -115,6 +115,16 @@ foreach ($testName in $featureTests) {
         throw "缺少功能回归程序 $testName，请完整构建测试目标后再发布。"
     }
 }
+$featureRuns = @(
+    [pscustomobject]@{ Name = "stats_tests"; Label = "stats_tests"; Arguments = @() },
+    [pscustomobject]@{ Name = "legacy_ui_tests"; Label = "legacy_ui_tests"; Arguments = @("-platform", "windows") },
+    [pscustomobject]@{ Name = "legacy_ui_tests"; Label = "time_input_tests"; Arguments = @(
+        "-platform", "offscreen", "selectedWholeTimeAcceptsFormats",
+        "invalidWholeTimeCanBeCorrectedOrCancelled", "allTimeEditorsAcceptWholeTimeAndKeepSectionEditing",
+        "timeEditorsWrapSelectedSectionWithKeyboardAndWheel", "enterInTimeEditorDoesNotSubmitDialog"
+    ) },
+    [pscustomobject]@{ Name = "backup_tests"; Label = "backup_tests"; Arguments = @() }
+)
 $windeployqt = Resolve-ToolPath $WindeployQtPath "windeployqt.exe" "windeployqt"
 $previousPath = $env:PATH
 $previousBackupService = $env:ATTENDANCE_BACKUP_TEST_SERVICE
@@ -127,11 +137,12 @@ try {
         }
     }
     $env:ATTENDANCE_BACKUP_TEST_SERVICE = (Resolve-Path -LiteralPath (Join-Path $SourceDir "AttendanceUpdateService.exe")).Path
-    foreach ($testName in $featureTests) {
-        $report = Join-Path ([System.IO.Path]::GetTempPath()) ($testName + "-" + [guid]::NewGuid().ToString("N") + ".txt")
+    foreach ($testRun in $featureRuns) {
+        $testName = $testRun.Name
+        $report = Join-Path ([System.IO.Path]::GetTempPath()) ($testRun.Label + "-" + [guid]::NewGuid().ToString("N") + ".txt")
         try {
             $testArguments = @("-o", ('"{0}",txt' -f $report))
-            if ($testName -eq "legacy_ui_tests") { $testArguments += @("-platform", "windows") }
+            $testArguments += $testRun.Arguments
             # CreateNoWindow 仅隐藏测试控制台，不设置影响 Qt 首次显示/最大化的 SW_HIDE。
             $process = New-Object System.Diagnostics.Process
             $process.StartInfo.FileName = Join-Path $SourceDir ($testName + ".exe")
@@ -142,10 +153,10 @@ try {
             if (-not $process.WaitForExit(90000)) {
                 $process.Kill()
                 $process.WaitForExit()
-                throw "功能回归 $testName 超时，已停止发布。"
+                throw "功能回归 $($testRun.Label) 超时，已停止发布。"
             }
             if (Test-Path -LiteralPath $report) { Get-Content -LiteralPath $report -Encoding UTF8 | Write-Output }
-            if ($process.ExitCode -ne 0) { throw "功能回归 $testName 失败，已停止发布。" }
+            if ($process.ExitCode -ne 0) { throw "功能回归 $($testRun.Label) 失败，已停止发布。" }
         } finally {
             if (Test-Path -LiteralPath $report) { Remove-Item -LiteralPath $report -Force }
         }
@@ -154,7 +165,7 @@ try {
     $env:PATH = $previousPath
     $env:ATTENDANCE_BACKUP_TEST_SERVICE = $previousBackupService
 }
-Write-Output "数据库兼容、月度目标、旧版界面功能与备份回归全部通过。"
+Write-Output "数据库兼容、月度目标、界面功能、完整时间输入与备份回归全部通过。"
 if ($CheckOnly) {
     return
 }

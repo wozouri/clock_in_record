@@ -78,12 +78,12 @@ cmake --build out/build/x64-RelWithDebInfo --config RelWithDebInfo
 - 使用 Inno Setup 分别生成客户端与更新服务 Windows 安装程序；
 - 写入更新服务读取的 `manifest.json`。
 
-发布脚本先强制运行结构版本 4、5、6 的旧版数据库回归、未知版本 7 的错误提示测试，以及月度目标、旧版界面功能和完整备份回归。缺少测试程序、超时或任何测试失败都会停止发布，且不修改发布目录与版本清单。根项目默认启用 `BUILD_TESTING`，完整构建会生成 `storage_compatibility_tests.exe`、`stats_tests.exe`、`legacy_ui_tests.exe` 和 `backup_tests.exe`。传入 `-CheckOnly` 可仅检查发布条件，不生成安装包。界面回归在 Windows Qt 平台运行，备份回归使用独立临时数据库和隔离服务。
+发布脚本先强制运行结构版本 4、5、6 的旧版数据库回归、未知版本 7 的错误提示测试，以及月度目标、界面功能、完整时间输入和完整备份回归。缺少测试程序、超时或任何测试失败都会停止发布，且不修改发布目录与版本清单。根项目默认启用 `BUILD_TESTING`，完整构建会生成 `storage_compatibility_tests.exe`、`stats_tests.exe`、`legacy_ui_tests.exe` 和 `backup_tests.exe`。传入 `-CheckOnly` 可仅检查发布条件，不生成安装包。界面回归在 Windows Qt 平台运行，完整时间输入回归使用隔离剪贴板，备份回归使用独立临时数据库和隔离服务。
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\make_update_package.ps1 `
   -SourceDir out\build\vs2022-RelWithDebInfo\RelWithDebInfo `
-  -Version v2026.10.10 `
+  -Version v2026.11.04 `
   -UpdatesDir D:\AttendanceUpdates
 ```
 
