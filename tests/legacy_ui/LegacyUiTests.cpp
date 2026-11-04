@@ -249,17 +249,18 @@ private slots:
         dialog.activateWindow();
         auto* editor = dialog.m_arrivalTimeEdit;
         editor->setFocus();
-        QTRY_VERIFY(editor->hasFocus());
+        // Test dialog event propagation without depending on desktop focus.
+        QTRY_COMPARE(dialog.focusWidget(), editor);
         editor->selectAll();
-        QTest::keyClicks(QApplication::focusWidget(), input);
-        QTest::keyClick(QApplication::focusWidget(), Qt::Key(key));
+        QTest::keyClicks(editor, input);
+        QTest::keyClick(editor, Qt::Key(key));
         QCOMPARE(editor->time(), expected);
         QCOMPARE(editor->text(), expected.toString("HH:mm"));
         QCOMPARE(saveClicks.count(), 0);
         QCOMPARE(finished.count(), 0);
         QVERIFY(dialog.isVisible());
         // Further Enter presses in the editor must also stay inside the dialog.
-        QTest::keyClick(QApplication::focusWidget(), Qt::Key(key));
+        QTest::keyClick(editor, Qt::Key(key));
         QCOMPARE(saveClicks.count(), 0);
         QCOMPARE(finished.count(), 0);
         QTest::mouseClick(save, Qt::LeftButton);
