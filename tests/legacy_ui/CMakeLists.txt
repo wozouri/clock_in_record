@@ -31,3 +31,6 @@ add_test(NAME time_input_whole_edit COMMAND legacy_ui_tests -platform offscreen
     enterInTimeEditorDoesNotSubmitDialog
     -o -,txt)
 set_tests_properties(time_input_whole_edit PROPERTIES TIMEOUT 15)
+add_test(NAME update_ui COMMAND legacy_ui_tests -platform offscreen
+    updateDialogKeepsLongNotesScrollable startupChecksForUpdatesAndNotifies -o -,txt)
+set_tests_properties(update_ui PROPERTIES TIMEOUT 20)

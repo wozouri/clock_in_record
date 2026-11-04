@@ -27,6 +27,7 @@
 #include <QKeySequence>
 #include <QTimer>
 #include <ElaContentDialog.h>
+#include <ElaPlainTextEdit.h>
 #include <ElaDialog.h>
 #include <ElaIconButton.h>
 #include <QPainter>
@@ -1653,7 +1654,7 @@ void AttendanceMainWindow::setupUpdateUi() {
                 QStringLiteral("已更新到版本 %1").arg(pendingVersion), 4000, this);
         });
     }
-    // 启动后静默检查一次更新；有新版本只亮角标，不打扰。
+    // 启动后检查一次更新；有新版本显示提示，无更新或连接失败时保持安静。
     QTimer::singleShot(3000, this, [this] {
         if (!m_updateChecker->isDownloadInProgress()) {
             m_updateChecker->checkForUpdates(false);
@@ -1825,16 +1826,17 @@ void AttendanceMainWindow::onCheckForUpdatesClicked() {
 
 void AttendanceMainWindow::onUpdateCheckFinished(const UpdateReleaseInfo& info, bool userInitiated) {
     m_updateCheckButton->setEnabled(true);
+    const bool newlyAvailable = !m_hasAvailableUpdate || m_availableUpdate.version != info.version;
     m_availableUpdate = info;
     m_hasAvailableUpdate = info.available && info.isNewer;
     m_updateIndicatorButton->setVisible(m_hasAvailableUpdate);
     if (m_hasAvailableUpdate) {
         m_updateIndicatorButton->setToolTip(
             QStringLiteral("发现新版本 %1，点击更新").arg(info.version));
-        if (userInitiated) {
+        if (userInitiated || newlyAvailable) {
             ElaMessageBar::success(ElaMessageBarType::Top, QStringLiteral("检查更新"),
                 QStringLiteral("发现新版本 %1，请点击标题栏的下载图标。").arg(info.version),
-                4000, this);
+                6000, this);
         }
     }
     else if (userInitiated) {
@@ -1903,11 +1905,34 @@ void AttendanceMainWindow::showUpdateConfirmDialog() {
         return;
     }
     auto* dialog = new ElaContentDialog(this);
+    dialog->setObjectName(QStringLiteral("updateConfirmDialog"));
     dialog->setAttribute(Qt::WA_DeleteOnClose);
-    dialog->setTitleText(QStringLiteral("发现新版本 %1").arg(m_availableUpdate.version));
-    dialog->setSubTitleText(m_availableUpdate.notes.isEmpty()
-        ? QStringLiteral("是否下载并安装更新？更新完成后程序将自动重启。")
-        : m_availableUpdate.notes);
+    // 默认副标题区域不能容纳长日志，改用独立的可滚动内容区。
+    auto* content = new QWidget(dialog);
+    content->setFixedSize(qMin(560, width() - 80), qMin(360, height() - 180));
+    auto* layout = new QVBoxLayout(content);
+    layout->setContentsMargins(20, 20, 20, 12);
+    layout->setSpacing(12);
+    auto* title = new QLabel(QStringLiteral("发现新版本 %1").arg(m_availableUpdate.version), content);
+    title->setTextFormat(Qt::PlainText);
+    title->setWordWrap(true);
+    QFont titleFont = title->font();
+    titleFont.setPixelSize(22);
+    titleFont.setBold(true);
+    title->setFont(titleFont);
+    layout->addWidget(title);
+    auto* notes = new ElaPlainTextEdit(content);
+    notes->setObjectName(QStringLiteral("updateReleaseNotes"));
+    notes->setReadOnly(true);
+    notes->setPlainText(m_availableUpdate.notes.isEmpty()
+        ? QStringLiteral("此版本未提供更新日志。") : m_availableUpdate.notes);
+    notes->setLineWrapMode(QPlainTextEdit::WidgetWidth);
+    notes->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    layout->addWidget(notes, 1);
+    auto* hint = new QLabel(QStringLiteral("更新完成后程序将自动重启。"), content);
+    hint->setWordWrap(true);
+    layout->addWidget(hint);
+    dialog->setCentralWidget(content);
     dialog->setLeftButtonText(QStringLiteral("取消"));
     dialog->setMiddleButtonVisible(false);
     dialog->setRightButtonText(QStringLiteral("更新并重启"));

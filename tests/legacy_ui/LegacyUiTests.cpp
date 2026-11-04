@@ -38,6 +38,12 @@
 #include <QFocusEvent>
 #include <QLineEdit>
 #include <ElaIconButton.h>
+#include <ElaContentDialog.h>
+#include <ElaMessageBar.h>
+#include <QTcpServer>
+#include <QTcpSocket>
+#include <QJsonDocument>
+#include <QJsonObject>
 #ifdef Q_OS_WIN
 #include <Windows.h>
 #endif
@@ -49,6 +55,7 @@ private slots:
     void initTestCase() {
         QCoreApplication::setOrganizationName("AttendanceRegressionTests");
         QCoreApplication::setApplicationName("LegacyUiTests");
+        QCoreApplication::setApplicationVersion(QStringLiteral("v2026.01.01"));
         QStandardPaths::setTestModeEnabled(true);
         UpdateChecker::saveUpdateServiceEndpoint("127.0.0.1", 9);
         auto db = QSqlDatabase::addDatabase("QSQLITE", "attendance-storage");
@@ -85,6 +92,116 @@ private slots:
         AttendanceStorage::saveWorkSchedule(WorkSchedule{});
         m_window->m_undoStack.clear();
         m_window->m_redoStack.clear();
+    }
+    void updateDialogKeepsLongNotesScrollable_data() {
+        QTest::addColumn<QString>("notes");
+        QTest::newRow("long-notes") << QStringLiteral("更新说明：支持仅备注日期、整段时间输入及回车确认。\n").repeated(80);
+        QTest::newRow("empty-notes") << QString();
+    }
+    void updateDialogKeepsLongNotesScrollable() {
+        QFETCH(QString, notes);
+        m_window->m_hasAvailableUpdate = true;
+        m_window->m_availableUpdate.version = QStringLiteral("v2026.11.04");
+        m_window->m_availableUpdate.notes = notes;
+        bool inspected = false;
+        // 在 exec 的事件循环中检查实际弹窗，并始终安排关闭，避免失败时挂住测试。
+        QTimer::singleShot(200, m_window, [this, notes, &inspected] {
+            auto* dialog = m_window->findChild<ElaContentDialog*>("updateConfirmDialog");
+            if (!dialog) return;
+            QTimer::singleShot(0, dialog, [dialog] { dialog->close(); });
+            auto* editor = dialog->findChild<QPlainTextEdit*>("updateReleaseNotes");
+            QVERIFY(editor);
+            QVERIFY(editor->isReadOnly());
+            QVERIFY(editor->isVisible());
+            QVERIFY(editor->viewport()->height() >= 120);
+            QCOMPARE(editor->lineWrapMode(), QPlainTextEdit::WidgetWidth);
+            if (!notes.isEmpty()) {
+                QCOMPARE(editor->toPlainText(), notes);
+                QVERIFY(editor->verticalScrollBar()->maximum() > 0);
+                editor->verticalScrollBar()->setValue(editor->verticalScrollBar()->maximum());
+                QVERIFY(editor->cursorForPosition(QPoint(2, 2)).blockNumber() > 0);
+            } else {
+                QVERIFY(!editor->toPlainText().isEmpty());
+            }
+            int actionCount = 0;
+            const QRect editorRect(editor->mapTo(dialog, QPoint()), editor->size());
+            for (auto* button : dialog->findChildren<QAbstractButton*>()) {
+                if (!button->isVisible() || (button->text() != QStringLiteral("取消")
+                        && button->text() != QStringLiteral("更新并重启"))) continue;
+                ++actionCount;
+                const QRect buttonRect(button->mapTo(dialog, QPoint()), button->size());
+                QVERIFY(dialog->rect().contains(buttonRect));
+                QVERIFY(!editorRect.intersects(buttonRect));
+                QVERIFY(buttonRect.top() > editorRect.bottom());
+            }
+            QCOMPARE(actionCount, 2);
+            const auto capture = qEnvironmentVariable("ATTENDANCE_UPDATE_CAPTURE");
+            if (!capture.isEmpty())
+                dialog->grab().save(capture + "-" + QTest::currentDataTag() + ".png");
+            inspected = true;
+        });
+        m_window->showUpdateConfirmDialog();
+        QVERIFY(inspected);
+        m_window->m_hasAvailableUpdate = false;
+    }
+    void startupChecksForUpdatesAndNotifies_data() {
+        QTest::addColumn<QString>("version");
+        QTest::addColumn<bool>("newer");
+        QTest::addColumn<int>("status");
+        QTest::newRow("new-version") << QStringLiteral("v2099.01.01") << true << 200;
+        QTest::newRow("current-version") << QCoreApplication::applicationVersion() << false << 200;
+        QTest::newRow("service-error") << QString() << false << 503;
+    }
+    void startupChecksForUpdatesAndNotifies() {
+        QFETCH(QString, version);
+        QFETCH(bool, newer);
+        QFETCH(int, status);
+        QTcpServer server;
+        QVERIFY(server.listen(QHostAddress::LocalHost));
+        int requests = 0;
+        QByteArray request;
+        connect(&server, &QTcpServer::newConnection, &server, [&] {
+            auto* socket = server.nextPendingConnection();
+            connect(socket, &QTcpSocket::readyRead, socket, [&, socket] {
+                QByteArray received = socket->property("request").toByteArray() + socket->readAll();
+                socket->setProperty("request", received);
+                if (!received.contains("\r\n\r\n")) return;
+                ++requests;
+                request = received;
+                const QByteArray body = QJsonDocument(QJsonObject{
+                    {"available", true}, {"version", version}, {"notes", QStringLiteral("启动检测")},
+                    {"downloadUrl", "/packages/test.zip"}, {"sha256", QString(64, 'a')}
+                }).toJson(QJsonDocument::Compact);
+                socket->write("HTTP/1.1 " + QByteArray::number(status)
+                    + " Test\r\nContent-Type: application/json\r\nContent-Length: "
+                    + QByteArray::number(body.size()) + "\r\nConnection: close\r\n\r\n" + body);
+                socket->disconnectFromHost();
+            });
+            connect(socket, &QTcpSocket::disconnected, socket, &QObject::deleteLater);
+        });
+        AttendanceMainWindow window;
+        window.m_updateChecker->setServiceBaseUrl(
+            QUrl(QStringLiteral("http://127.0.0.1:%1").arg(server.serverPort())));
+        bool finished = false;
+        bool manual = true;
+        connect(window.m_updateChecker, &UpdateChecker::checkFinished, &window,
+            [&](const UpdateReleaseInfo&, bool userInitiated) {
+                manual = userInitiated;
+                finished = true;
+            });
+        window.show();
+        QTRY_VERIFY_WITH_TIMEOUT(finished, 6000);
+        QCOMPARE(requests, 1);
+        QVERIFY(request.startsWith("GET /api/client/release?target=windows-x86_64 "));
+        QVERIFY(!manual);
+        QCOMPARE(window.m_hasAvailableUpdate, newer);
+        QCOMPARE(window.m_updateIndicatorButton->isVisible(), newer);
+        QCOMPARE(window.findChildren<ElaMessageBar*>().size(), newer ? 1 : 0);
+        QVERIFY(!window.findChild<ElaContentDialog*>());
+        if (newer) {
+            window.onUpdateCheckFinished(window.m_availableUpdate, false);
+            QCOMPARE(window.findChildren<ElaMessageBar*>().size(), 1);
+        }
     }
     void timeEditorsWrapSelectedSectionWithKeyboardAndWheel() {
         TimeSettingDialog dialog(QDate(2026,10,10), WorkSchedule{});
