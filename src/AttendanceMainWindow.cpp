@@ -27,7 +27,11 @@
 #include <QKeySequence>
 #include <QTimer>
 #include <ElaContentDialog.h>
-#include <ElaPlainTextEdit.h>
+#include <QTextBrowser>
+#include <QTextBlock>
+#include <QTextCursor>
+#include <QAbstractTextDocumentLayout>
+#include <QtMath>
 #include <ElaDialog.h>
 #include <ElaIconButton.h>
 #include <QPainter>
@@ -47,6 +51,7 @@
 #include <ElaTeachingTip.h>
 #include "Update/UpdateChecker.h"
 #include <algorithm>
+#include <memory>
 
 #ifdef Q_OS_WIN
 #ifndef NOMINMAX
@@ -1907,31 +1912,75 @@ void AttendanceMainWindow::showUpdateConfirmDialog() {
     auto* dialog = new ElaContentDialog(this);
     dialog->setObjectName(QStringLiteral("updateConfirmDialog"));
     dialog->setAttribute(Qt::WA_DeleteOnClose);
-    // 默认副标题区域不能容纳长日志，改用独立的可滚动内容区。
+    // 日志采用阅读式排版，短内容收紧高度，长内容在独立区域滚动。
     auto* content = new QWidget(dialog);
-    content->setFixedSize(qMin(560, width() - 80), qMin(360, height() - 180));
+    content->setFixedWidth(qMin(600, width() - 80));
     auto* layout = new QVBoxLayout(content);
-    layout->setContentsMargins(20, 20, 20, 12);
-    layout->setSpacing(12);
-    auto* title = new QLabel(QStringLiteral("发现新版本 %1").arg(m_availableUpdate.version), content);
-    title->setTextFormat(Qt::PlainText);
-    title->setWordWrap(true);
+    layout->setContentsMargins(24, 24, 24, 18);
+    layout->setSpacing(18);
+    auto* titleRow = new QHBoxLayout;
+    titleRow->setSpacing(12);
+    auto* title = new QLabel(QStringLiteral("发现新版本"), content);
     QFont titleFont = title->font();
-    titleFont.setPixelSize(22);
+    titleFont.setPixelSize(21);
     titleFont.setBold(true);
     title->setFont(titleFont);
-    layout->addWidget(title);
-    auto* notes = new ElaPlainTextEdit(content);
+    title->setStyleSheet(QStringLiteral("color: #172b4d;"));
+    titleRow->addWidget(title);
+    auto* version = new QLabel(m_availableUpdate.version, content);
+    version->setTextFormat(Qt::PlainText);
+    version->setStyleSheet(QStringLiteral(
+        "color: #1769aa; background: #edf5fc; border-radius: 5px;"
+        "padding: 4px 9px; font-size: 12px;"));
+    titleRow->addWidget(version, 0, Qt::AlignVCenter);
+    titleRow->addStretch();
+    layout->addLayout(titleRow);
+    auto* notes = new QTextBrowser(content);
     notes->setObjectName(QStringLiteral("updateReleaseNotes"));
-    notes->setReadOnly(true);
+    notes->setFrameShape(QFrame::NoFrame);
+    notes->setOpenLinks(false);
+    notes->setStyleSheet(QStringLiteral(
+        "QTextBrowser { border: none; background: transparent; color: #40516a; }"));
+    QFont notesFont = notes->font();
+    notesFont.setPixelSize(13);
+    notes->setFont(notesFont);
+    notes->document()->setDocumentMargin(0);
     notes->setPlainText(m_availableUpdate.notes.isEmpty()
-        ? QStringLiteral("此版本未提供更新日志。") : m_availableUpdate.notes);
-    notes->setLineWrapMode(QPlainTextEdit::WidgetWidth);
+        ? QStringLiteral("此版本未提供更新日志。") : m_availableUpdate.notes.trimmed());
+    notes->setWordWrapMode(QTextOption::WrapAtWordBoundaryOrAnywhere);
     notes->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    layout->addWidget(notes, 1);
+    for (auto block = notes->document()->begin(); block.isValid(); block = block.next()) {
+        QTextCursor cursor(block);
+        QTextBlockFormat paragraph;
+        paragraph.setLineHeight(150, QTextBlockFormat::ProportionalHeight);
+        paragraph.setBottomMargin(block.next().isValid() ? 14 : 0);
+        cursor.setBlockFormat(paragraph);
+        // 清单使用“标题：说明”时突出标题，原始日志内容保持可复制。
+        const QString text = block.text();
+        int separator = text.indexOf(QChar(0xff1a));
+        if (separator < 0) separator = text.indexOf(QLatin1Char(':'));
+        if (separator > 0 && separator <= 32) {
+            cursor.movePosition(QTextCursor::NextCharacter, QTextCursor::KeepAnchor, separator + 1);
+            QTextCharFormat heading;
+            heading.setFontWeight(QFont::DemiBold);
+            heading.setForeground(QColor(QStringLiteral("#172b4d")));
+            cursor.mergeCharFormat(heading);
+        }
+    }
+    // 独立测量以避开显示前的视口尺寸，预留滚动条宽度避免临界换行被裁切。
+    {
+        const std::unique_ptr<QTextDocument> measurement(notes->document()->clone());
+        measurement->documentLayout()->setPaintDevice(notes->viewport());
+        measurement->setTextWidth(content->width() - 48 - 16);
+        notes->setFixedHeight(qBound(48, qCeil(measurement->size().height()) + 8,
+            qMin(300, height() - 240)));
+    }
+    layout->addWidget(notes);
     auto* hint = new QLabel(QStringLiteral("更新完成后程序将自动重启。"), content);
+    hint->setStyleSheet(QStringLiteral("color: #7a8799; font-size: 12px;"));
     hint->setWordWrap(true);
     layout->addWidget(hint);
+    content->setFixedHeight(layout->sizeHint().height());
     dialog->setCentralWidget(content);
     dialog->setLeftButtonText(QStringLiteral("取消"));
     dialog->setMiddleButtonVisible(false);

@@ -44,6 +44,7 @@
 #include <QTcpSocket>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QTextBrowser>
 #ifdef Q_OS_WIN
 #include <Windows.h>
 #endif
@@ -97,6 +98,11 @@ private slots:
         QTest::addColumn<QString>("notes");
         QTest::newRow("long-notes") << QStringLiteral("更新说明：支持仅备注日期、整段时间输入及回车确认。\n").repeated(80);
         QTest::newRow("empty-notes") << QString();
+        QTest::newRow("short-notes") << QStringLiteral("显示优化：更新日志支持自动换行与滚动。");
+        QTest::newRow("release-notes") << QStringLiteral(
+            "空白日期也能记备注：在日期编辑中关闭“记录上下班时间”，即可只保存备注。日历保留备注提示，支持复制、导入导出及撤销，不计入工作天数、工时和餐补统计。\n"
+            "时间调整支持循环：选中小时或分钟后，可用键盘上下键或鼠标滚轮循环调整。分钟支持 00 ↔ 59，小时支持 00 ↔ 23；调整分钟时小时保持不变。\n"
+            "全选后可直接输入完整时间：支持输入或 Ctrl+V 粘贴 08:59、8:59、0859，自动规范显示为 08:59。859、8:5 等简写可按回车或离开输入框确认；焦点在时间框内时，回车只确认时间，不触发弹窗保存或关闭。非法输入不会覆盖原时间，按 Esc 可取消尚未确认的输入。");
     }
     void updateDialogKeepsLongNotesScrollable() {
         QFETCH(QString, notes);
@@ -109,19 +115,27 @@ private slots:
             auto* dialog = m_window->findChild<ElaContentDialog*>("updateConfirmDialog");
             if (!dialog) return;
             QTimer::singleShot(0, dialog, [dialog] { dialog->close(); });
-            auto* editor = dialog->findChild<QPlainTextEdit*>("updateReleaseNotes");
+            auto* editor = dialog->findChild<QTextBrowser*>("updateReleaseNotes");
             QVERIFY(editor);
             QVERIFY(editor->isReadOnly());
             QVERIFY(editor->isVisible());
-            QVERIFY(editor->viewport()->height() >= 120);
-            QCOMPARE(editor->lineWrapMode(), QPlainTextEdit::WidgetWidth);
+            QCOMPARE(editor->frameShape(), QFrame::NoFrame);
+            QCOMPARE(editor->lineWrapMode(), QTextEdit::WidgetWidth);
             if (!notes.isEmpty()) {
-                QCOMPARE(editor->toPlainText(), notes);
+                QCOMPARE(editor->toPlainText(), notes.trimmed());
+            } else {
+                QVERIFY(!editor->toPlainText().isEmpty());
+            }
+            if (qstrcmp(QTest::currentDataTag(), "long-notes") == 0) {
+                QVERIFY(editor->viewport()->height() >= 120);
                 QVERIFY(editor->verticalScrollBar()->maximum() > 0);
                 editor->verticalScrollBar()->setValue(editor->verticalScrollBar()->maximum());
                 QVERIFY(editor->cursorForPosition(QPoint(2, 2)).blockNumber() > 0);
             } else {
-                QVERIFY(!editor->toPlainText().isEmpty());
+                QCOMPARE(editor->verticalScrollBar()->maximum(), 0);
+                QVERIFY(editor->height() <= 300);
+                if (qstrcmp(QTest::currentDataTag(), "release-notes") != 0)
+                    QVERIFY(editor->height() <= 64);
             }
             int actionCount = 0;
             const QRect editorRect(editor->mapTo(dialog, QPoint()), editor->size());
