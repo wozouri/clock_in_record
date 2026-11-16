@@ -6,6 +6,8 @@
 #include "Utils/CustomCalendarWidget.h"
 #include "Utils/WorkScheduleSettingsPage.h"
 #include "Utils/TimeInputEdit.h"
+#include "Utils/AppTheme.h"
+#include <ElaTheme.h>
 #include <ElaApplication.h>
 #include <ElaPushButton.h>
 #include <ElaScrollArea.h>
@@ -36,6 +38,7 @@
 #include <QWheelEvent>
 #include <QClipboard>
 #include <QFocusEvent>
+#include <QSettings>
 #include <QLineEdit>
 #include <ElaIconButton.h>
 #include <ElaContentDialog.h>
@@ -52,6 +55,7 @@
 class LegacyUiTests : public QObject {
     Q_OBJECT
     AttendanceMainWindow* m_window = nullptr;
+    QVariant m_originalTheme;
 private slots:
     void initTestCase() {
         QCoreApplication::setOrganizationName("AttendanceRegressionTests");
@@ -65,6 +69,9 @@ private slots:
         QString error;
         QVERIFY2(AttendanceStorage::initialize(error), qPrintable(error));
         eApp->init();
+        m_originalTheme = QSettings().value(QStringLiteral("appearance/theme"));
+        QSettings().remove(QStringLiteral("appearance/theme"));
+        AppTheme::initialize();
         initializeAppFont();
         m_window = new AttendanceMainWindow;
         m_window->show();
@@ -88,11 +95,108 @@ private slots:
         }
     }
     void init() {
+        AppTheme::setNightMode(false);
         QSqlQuery query(QSqlDatabase::database("attendance-storage"));
         QVERIFY(query.exec("DELETE FROM records"));
         AttendanceStorage::saveWorkSchedule(WorkSchedule{});
         m_window->m_undoStack.clear();
         m_window->m_redoStack.clear();
+    }
+    void nightThemeSwitchPersistsAndRefreshesWidgets() {
+        WorkScheduleSettingsPage page;
+        page.setWorkSchedule(WorkSchedule{});
+        page.setUpdateServiceEndpoint(QStringLiteral("127.0.0.1"), 47980);
+        page.resize(1060, 720);
+        page.show();
+        auto* toggle = page.findChild<ElaToggleSwitch*>(QStringLiteral("nightModeToggle"));
+        QVERIFY(toggle);
+        QVERIFY(!toggle->getIsToggled());
+        int scheduleSaved = 0;
+        connect(&page, &WorkScheduleSettingsPage::workScheduleSaved, &page, [&] { ++scheduleSaved; });
+        auto* editor = page.findChild<QTimeEdit*>();
+        QVERIFY(editor);
+        editor->setTime(QTime(8, 37)); // Unsaved edits must survive an appearance change.
+        QTest::mouseClick(toggle, Qt::LeftButton);
+        QVERIFY(AppTheme::isNightMode());
+        QCOMPARE(QSettings().value(QStringLiteral("appearance/theme")).toString(), QStringLiteral("dark"));
+        QCOMPARE(editor->time(), QTime(8, 37));
+        QCOMPARE(scheduleSaved, 0);
+        QVERIFY(page.styleSheet().contains(QStringLiteral("#202020")));
+        QVERIFY(m_window->findChild<QWidget*>(QStringLiteral("attendanceToolbar"))
+            ->styleSheet().contains(QStringLiteral("#282828")));
+        const auto capture = qEnvironmentVariable("ATTENDANCE_THEME_CAPTURE");
+        QTest::qWait(100);
+        if (!capture.isEmpty()) {
+            page.grab().save(capture + "-settings.png");
+            m_window->grab().save(capture + "-main.png");
+        }
+
+        // Reload the saved preference after resetting Ela, as on a new startup.
+        eTheme->setThemeMode(ElaThemeType::Light);
+        QVERIFY(!toggle->getIsToggled());
+        AppTheme::initialize();
+        QVERIFY(AppTheme::isNightMode());
+        QVERIFY(toggle->getIsToggled());
+        WorkScheduleSettingsPage reopened;
+        QVERIFY(reopened.findChild<ElaToggleSwitch*>(QStringLiteral("nightModeToggle"))->getIsToggled());
+        QTest::mouseClick(toggle, Qt::LeftButton);
+        QVERIFY(!AppTheme::isNightMode());
+        QCOMPARE(QSettings().value(QStringLiteral("appearance/theme")).toString(), QStringLiteral("light"));
+        QVERIFY(page.styleSheet().contains(QStringLiteral("#f7f9fc")));
+        QCOMPARE(editor->time(), QTime(8, 37));
+    }
+    void nightThemeCalendarAndEditorRemainReadable() {
+        AppTheme::setNightMode(true);
+        const QDate today(2026, 11, 16);
+        CustomCalendarWidget calendar(nullptr, [today] { return today; });
+        calendar.resize(1008, 680);
+        calendar.setGridVisible(true);
+        const QVariantMap data{{"arrivalTime", "09:00"}, {"departureTime", "21:00"},
+            {"hasNote", true}, {"note", "夜间备注"}, {"hasCustomSchedule", true}, {"hasMealAllowance", true}};
+        calendar.setCustomData(today, data);
+        calendar.setCustomData(today.addDays(1), data);
+        QTextCharFormat alternate;
+        alternate.setBackground(QColor("#acfdea"));
+        calendar.setDateTextFormat(today.addDays(1), alternate);
+        calendar.setSelectedDates({today});
+        calendar.show();
+        const auto capture = qEnvironmentVariable("ATTENDANCE_THEME_CAPTURE");
+        const QImage month = calendar.grab().toImage();
+        const qreal dpr = month.devicePixelRatio();
+        const auto pixel = [dpr](const QImage& image, const QPoint& p) {
+            return image.pixelColor(qRound(p.x() * dpr), qRound(p.y() * dpr));
+        };
+        QCOMPARE(pixel(month, QPoint(2, 2)), QColor("#282828"));
+        const int index = calendar.firstVisibleDate().daysTo(today);
+        const QRect cell = calendar.cellRect(index / 7, index % 7);
+        QCOMPARE(pixel(month, cell.topLeft() + QPoint(12, cell.height() / 2)), QColor("#294735"));
+        const QRect nextCell = calendar.cellRect((index + 1) / 7, (index + 1) % 7);
+        QCOMPARE(pixel(month, nextCell.topLeft() + QPoint(12, nextCell.height() / 2)), QColor("#254840"));
+        if (!capture.isEmpty()) month.save(capture + "-calendar.png");
+        calendar.setYearOverviewVisible(true);
+        const QImage year = calendar.grab().toImage();
+        QCOMPARE(pixel(year, calendar.monthPreviewRect(11).topLeft() + QPoint(10, 30)), QColor("#282828"));
+        if (!capture.isEmpty()) year.save(capture + "-year.png");
+
+        TimeSettingDialog dialog(today, WorkSchedule{}, m_window);
+        dialog.show();
+        QTest::qWait(100);
+        QVERIFY(dialog.styleSheet().contains(QStringLiteral("#202020")));
+        const QColor ink = dialog.m_arrivalTimeEdit->palette().color(QPalette::Text);
+        const QColor paper = dialog.m_arrivalTimeEdit->palette().color(QPalette::Base);
+        QVERIFY(ink.lightness() > 180);
+        QVERIFY(paper.lightness() < 80);
+        const QImage editorImage = dialog.m_arrivalTimeEdit->grab().toImage();
+        QVERIFY(editorImage.pixelColor(editorImage.width() - 8, editorImage.height() / 2).lightness() < 80);
+        dialog.m_arrivalTimeEdit->setTime(QTime(8, 45));
+        QCOMPARE(dialog.m_arrivalTimeEdit->time(), QTime(8, 45));
+        if (!capture.isEmpty()) dialog.grab().save(capture + "-editor.png");
+        AppTheme::setNightMode(false);
+        QVERIFY(dialog.m_arrivalTimeEdit->styleSheet().contains(QStringLiteral("#ffffff")));
+        calendar.setYearOverviewVisible(false);
+        QCOMPARE(pixel(calendar.grab().toImage(), QPoint(2, 2)), QColor("#ffffff"));
+        QCOMPARE(dialog.m_arrivalTimeEdit->time(), QTime(8, 45));
+        QCOMPARE(calendar.selectedDates(), QList<QDate>{today});
     }
     void updateDialogKeepsLongNotesScrollable_data() {
         QTest::addColumn<QString>("notes");
@@ -1187,6 +1291,11 @@ private slots:
         QTest::qWait(300);
         delete m_window;
         m_window = nullptr;
+        AppTheme::setNightMode(false);
+        if (m_originalTheme.isValid())
+            QSettings().setValue(QStringLiteral("appearance/theme"), m_originalTheme);
+        else
+            QSettings().remove(QStringLiteral("appearance/theme"));
     }
 };
 int main(int argc, char** argv)

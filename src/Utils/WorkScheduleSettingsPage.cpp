@@ -1,4 +1,5 @@
 #include "WorkScheduleSettingsPage.h"
+#include "AppTheme.h"
 #include "TimeInputEdit.h"
 #include <ElaScrollArea.h>
 #include <QSignalBlocker>
@@ -9,6 +10,7 @@
 #include <ElaPushButton.h>
 #include <ElaText.h>
 #include <ElaToggleSwitch.h>
+#include <ElaTheme.h>
 
 #include <QGridLayout>
 #include <QAbstractSpinBox>
@@ -26,13 +28,13 @@
 namespace {
 QLabel* createFieldLabel(const QString& text, QWidget* parent) {
     auto* label = new QLabel(text, parent);
-    label->setStyleSheet(QStringLiteral("color: #40566f; background: transparent;"));
+    AppTheme::bindStyleSheet(label, QStringLiteral("color: ${secondaryText}; background: transparent;"));
     return label;
 }
 
 QLabel* createSectionLabel(const QString& text, QWidget* parent) {
     auto* label = new QLabel(text, parent);
-    label->setStyleSheet(QStringLiteral("color: #223550; background: transparent; font-weight: 600;"));
+    AppTheme::bindStyleSheet(label, QStringLiteral("color: ${text}; background: transparent; font-weight: 600;"));
     return label;
 }
 
@@ -49,23 +51,23 @@ WorkScheduleSettingsPage::WorkScheduleSettingsPage(QWidget* parent)
 {
     setObjectName(QStringLiteral("workScheduleSettingsPage"));
     setMinimumSize(840, 560);
-    setStyleSheet(QStringLiteral(
-        "QWidget#workScheduleSettingsPage { background: #f7f9fc; }"
-        "QTimeEdit { min-height: 32px; color: #223550; background: #ffffff;"
-        " border: 1px solid #cfdbe7; border-radius: 5px; padding: 0 9px; }"
-        "QTimeEdit:hover { border-color: #9ebdd8; }"
-        "QTimeEdit:focus { border: 1px solid #5b9bd5; }"
-        "ElaLineEdit { color: #223550; background: #ffffff; border: 1px solid #cfdbe7;"
+    AppTheme::bindStyleSheet(this, QStringLiteral(
+        "QWidget#workScheduleSettingsPage { background: ${window}; }"
+        "QTimeEdit { min-height: 32px; color: ${text}; background: ${surface};"
+        " border: 1px solid ${border}; border-radius: 5px; padding: 0 9px; }"
+        "QTimeEdit:hover { border-color: ${hoverBorder}; }"
+        "QTimeEdit:focus { border: 1px solid ${selectionBorder}; }"
+        "ElaLineEdit { color: ${text}; background: ${surface}; border: 1px solid ${border};"
         " border-radius: 5px; padding: 0 9px; }"
-        "ElaLineEdit:hover { border-color: #9ebdd8; }"
-        "ElaLineEdit:focus { border: 1px solid #5b9bd5; }"
-        "QTimeEdit[hasPendingChange=\"true\"] { color: #734500; background: #fff8e8;"
-        " border: 1px solid #e6ad55; }"
-        "QTimeEdit[hasPendingChange=\"true\"]:focus { border-color: #d78b20; }"
-        "ElaLineEdit[hasPendingChange=\"true\"] { color: #734500; background: #fff8e8;"
-        " border: 1px solid #e6ad55; }"
-        "ElaLineEdit[hasPendingChange=\"true\"]:focus { border-color: #d78b20; }"
-        "QTimeEdit:disabled { color: #9aa8b5; background: #f3f5f7; border-color: #e0e6ec; }"));
+        "ElaLineEdit:hover { border-color: ${hoverBorder}; }"
+        "ElaLineEdit:focus { border: 1px solid ${selectionBorder}; }"
+        "QTimeEdit[hasPendingChange=\"true\"] { color: ${warning}; background: ${warningSurface};"
+        " border: 1px solid ${warningBorder}; }"
+        "QTimeEdit[hasPendingChange=\"true\"]:focus { border-color: ${warningBorder}; }"
+        "ElaLineEdit[hasPendingChange=\"true\"] { color: ${warning}; background: ${warningSurface};"
+        " border: 1px solid ${warningBorder}; }"
+        "ElaLineEdit[hasPendingChange=\"true\"]:focus { border-color: ${warningBorder}; }"
+        "QTimeEdit:disabled { color: ${disabledText}; background: ${disabledSurface}; border-color: ${border}; }"));
 
     auto* mainLayout = new QVBoxLayout(this);
     mainLayout->setContentsMargins(36, 28, 36, 28);
@@ -76,15 +78,15 @@ WorkScheduleSettingsPage::WorkScheduleSettingsPage(QWidget* parent)
     auto* titleLayout = new QVBoxLayout();
     titleLayout->setSpacing(4);
     auto* title = new ElaText(QStringLiteral("设置"), 23, this);
-    title->setStyleSheet(QStringLiteral("color: #12213d; background: transparent; font-weight: 600;"));
+    AppTheme::bindStyleSheet(title, QStringLiteral("color: ${text}; background: transparent; font-weight: 600;"));
     auto* subtitle = new QLabel(QStringLiteral("工作制度与数据管理"), this);
-    subtitle->setStyleSheet(QStringLiteral("color: #65778a; background: transparent;"));
+    AppTheme::bindStyleSheet(subtitle, QStringLiteral("color: ${mutedText}; background: transparent;"));
     titleLayout->addWidget(title);
     titleLayout->addWidget(subtitle);
     headerLayout->addLayout(titleLayout);
     m_pendingChangesLabel = new QLabel(QStringLiteral("未保存修改"), this);
-    m_pendingChangesLabel->setStyleSheet(
-        QStringLiteral("color: #a66308; background: transparent; padding-left: 6px;"));
+    AppTheme::bindStyleSheet(m_pendingChangesLabel,
+        QStringLiteral("color: ${warning}; background: transparent; padding-left: 6px;"));
     m_pendingChangesLabel->hide();
     headerLayout->addWidget(m_pendingChangesLabel);
     headerLayout->addStretch();
@@ -94,16 +96,24 @@ WorkScheduleSettingsPage::WorkScheduleSettingsPage(QWidget* parent)
     m_saveButton->setLightDefaultColor(QColor(QStringLiteral("#1769aa")));
     m_saveButton->setLightHoverColor(QColor(QStringLiteral("#0f5c9b")));
     m_saveButton->setLightTextColor(Qt::white);
+    m_saveButton->setDarkDefaultColor(QColor(QStringLiteral("#327db8")));
+    m_saveButton->setDarkHoverColor(QColor(QStringLiteral("#3f8dcc")));
+    m_saveButton->setDarkTextColor(Qt::white);
     connect(m_saveButton, &ElaPushButton::clicked, this, &WorkScheduleSettingsPage::saveWorkSchedule);
 
     auto* aboutButton = new ElaPushButton(QStringLiteral("关于"), this);
-    aboutButton->setIcon(ElaIcon::getInstance()->getElaIcon(ElaIconType::CircleInfo, 15));
+    const auto updateAboutIcon = [aboutButton] {
+        aboutButton->setIcon(ElaIcon::getInstance()->getElaIcon(ElaIconType::CircleInfo, 15,
+            AppTheme::color(AppTheme::Color::SecondaryText)));
+    };
+    updateAboutIcon();
+    connect(eTheme, &ElaTheme::themeModeChanged, aboutButton, updateAboutIcon);
     aboutButton->setIconSize(QSize(15, 15));
     configureActionButton(aboutButton, 86);
-    aboutButton->setStyleSheet(QStringLiteral(
-        "QPushButton { color: #40566f; background: #ffffff; border: 1px solid #cfdbe7;"
+    AppTheme::bindStyleSheet(aboutButton, QStringLiteral(
+        "QPushButton { color: ${secondaryText}; background: ${surface}; border: 1px solid ${border};"
         " border-radius: 5px; padding: 0 12px; }"
-        "QPushButton:hover { color: #1769aa; background: #edf4fb; border-color: #9ebdd8; }"));
+        "QPushButton:hover { color: ${accent}; background: ${hoverSurface}; border-color: ${hoverBorder}; }"));
     connect(aboutButton, &ElaPushButton::clicked, this, &WorkScheduleSettingsPage::aboutRequested);
     headerLayout->addWidget(aboutButton);
     headerLayout->addWidget(m_saveButton);
@@ -122,11 +132,33 @@ WorkScheduleSettingsPage::WorkScheduleSettingsPage(QWidget* parent)
     panelLayout->addLayout(scheduleLayout, 1);
     panelLayout->addLayout(dataLayout, 1);
 
+    auto* appearanceGroup = new ElaGroupBox(QStringLiteral("外观"), settingsPanel);
+    auto* appearanceLayout = new QGridLayout(appearanceGroup);
+    appearanceLayout->setContentsMargins(20, 22, 20, 20);
+    appearanceLayout->setHorizontalSpacing(12);
+    appearanceLayout->setVerticalSpacing(10);
+    auto* nightModeToggle = new ElaToggleSwitch(appearanceGroup);
+    nightModeToggle->setObjectName(QStringLiteral("nightModeToggle"));
+    nightModeToggle->setToolTip(QStringLiteral("立即切换主题，并在下次启动时保留"));
+    nightModeToggle->setIsToggled(AppTheme::isNightMode());
+    appearanceLayout->addWidget(createSectionLabel(QStringLiteral("夜间主题"), appearanceGroup), 0, 0);
+    appearanceLayout->addWidget(nightModeToggle, 0, 1, Qt::AlignRight);
+    auto* appearanceHint = createFieldLabel(QStringLiteral("立即生效，自动保存主题选择"), appearanceGroup);
+    appearanceLayout->addWidget(appearanceHint, 1, 0, 1, 2);
+    appearanceLayout->setColumnStretch(0, 1);
+    dataLayout->addWidget(appearanceGroup);
+    connect(nightModeToggle, &ElaToggleSwitch::toggled, this, &AppTheme::setNightMode);
+    connect(eTheme, &ElaTheme::themeModeChanged, nightModeToggle, [nightModeToggle] {
+        const QSignalBlocker blocker(nightModeToggle);
+        nightModeToggle->setIsToggled(AppTheme::isNightMode());
+    });
+
     auto* workGroup = new ElaGroupBox(QStringLiteral("标准工作时间"), settingsPanel);
-    workGroup->setStyleSheet(QStringLiteral(
-        "ElaGroupBox { background: #ffffff; border: 1px solid #d8e3ee; border-radius: 8px;"
+    AppTheme::bindStyleSheet(workGroup, QStringLiteral(
+        "ElaGroupBox { background: ${surface}; border: 1px solid ${border}; border-radius: 8px;"
         " margin-top: 10px; padding-top: 6px; }"
-        "ElaGroupBox::title { subcontrol-origin: margin; left: 16px; padding: 0 5px; color: #223550; font-weight: 600; }"));
+        "ElaGroupBox::title { subcontrol-origin: margin; left: 16px; padding: 0 5px; color: ${text}; font-weight: 600; }"));
+    AppTheme::bindStyleSheet(appearanceGroup, workGroup);
     auto* workLayout = new QGridLayout(workGroup);
     workLayout->setContentsMargins(20, 22, 20, 20);
     workLayout->setHorizontalSpacing(12);
@@ -142,7 +174,7 @@ WorkScheduleSettingsPage::WorkScheduleSettingsPage(QWidget* parent)
     scheduleLayout->addWidget(workGroup);
 
     auto* breakGroup = new ElaGroupBox(QStringLiteral("休息时间"), settingsPanel);
-    breakGroup->setStyleSheet(workGroup->styleSheet());
+    AppTheme::bindStyleSheet(breakGroup, workGroup);
     auto* breakLayout = new QGridLayout(breakGroup);
     breakLayout->setContentsMargins(20, 22, 20, 20);
     breakLayout->setHorizontalSpacing(10);
@@ -174,7 +206,7 @@ WorkScheduleSettingsPage::WorkScheduleSettingsPage(QWidget* parent)
     scheduleLayout->addWidget(breakGroup);
 
     auto* mealAllowanceGroup = new ElaGroupBox(QStringLiteral("餐补统计"), settingsPanel);
-    mealAllowanceGroup->setStyleSheet(workGroup->styleSheet());
+    AppTheme::bindStyleSheet(mealAllowanceGroup, workGroup);
     auto* mealAllowanceLayout = new QGridLayout(mealAllowanceGroup);
     mealAllowanceLayout->setContentsMargins(20, 22, 20, 20);
     mealAllowanceLayout->setHorizontalSpacing(12);
@@ -191,7 +223,7 @@ WorkScheduleSettingsPage::WorkScheduleSettingsPage(QWidget* parent)
     scheduleLayout->addStretch();
 
     auto* updateGroup = new ElaGroupBox(QStringLiteral("更新服务"), settingsPanel);
-    updateGroup->setStyleSheet(workGroup->styleSheet());
+    AppTheme::bindStyleSheet(updateGroup, workGroup);
     auto* updateLayout = new QGridLayout(updateGroup);
     updateLayout->setContentsMargins(20, 22, 20, 20);
     updateLayout->setHorizontalSpacing(12);
@@ -210,13 +242,13 @@ WorkScheduleSettingsPage::WorkScheduleSettingsPage(QWidget* parent)
     updateLayout->addWidget(m_updateServerPortEdit, 1, 1);
     auto* serviceHint = new QLabel(QStringLiteral("检查更新和本机备份共用此地址"), updateGroup);
     serviceHint->setWordWrap(true);
-    serviceHint->setStyleSheet(QStringLiteral("color: #65778a; background: transparent;"));
+    AppTheme::bindStyleSheet(serviceHint, QStringLiteral("color: ${mutedText}; background: transparent;"));
     updateLayout->addWidget(serviceHint, 2, 0, 1, 2);
     updateLayout->setColumnStretch(0, 1);
     dataLayout->addWidget(updateGroup);
 
     auto* backupGroup = new ElaGroupBox(QStringLiteral("本机备份"), settingsPanel);
-    backupGroup->setStyleSheet(workGroup->styleSheet());
+    AppTheme::bindStyleSheet(backupGroup, workGroup);
     auto* backupLayout = new QGridLayout(backupGroup);
     backupLayout->setContentsMargins(20, 22, 20, 20);
     backupLayout->setHorizontalSpacing(12);
@@ -236,7 +268,7 @@ WorkScheduleSettingsPage::WorkScheduleSettingsPage(QWidget* parent)
         "开启后立即备份；错过零点将在下次启动补备份。\n"
         "仅可下载本机的备份。"), backupGroup);
     explanation->setWordWrap(true);
-    explanation->setStyleSheet(QStringLiteral("color: #65778a; background: transparent;"));
+    AppTheme::bindStyleSheet(explanation, QStringLiteral("color: ${mutedText}; background: transparent;"));
     backupLayout->addWidget(explanation, 1, 0, 1, 2);
     auto* backupActions = new QHBoxLayout();
     backupActions->setSpacing(12);
@@ -247,8 +279,8 @@ WorkScheduleSettingsPage::WorkScheduleSettingsPage(QWidget* parent)
     m_backupStatusLabel = new QLabel(QStringLiteral("尚未备份"), backupGroup);
     m_backupStatusLabel->setWordWrap(true);
     m_backupStatusLabel->setTextFormat(Qt::PlainText);
-    m_backupStatusLabel->setStyleSheet(QStringLiteral(
-        "color: #40566f; background: #f3f7fb; border-radius: 5px; padding: 9px 10px;"));
+    AppTheme::bindStyleSheet(m_backupStatusLabel, QStringLiteral(
+        "color: ${secondaryText}; background: ${subtleSurface}; border-radius: 5px; padding: 9px 10px;"));
     backupLayout->addWidget(m_backupStatusLabel, 3, 0, 1, 2);
     backupLayout->setColumnStretch(0, 1);
     dataLayout->addWidget(backupGroup);

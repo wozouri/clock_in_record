@@ -1,4 +1,5 @@
 #include "TimeSettingDialog.h"
+#include "AppTheme.h"
 #include "TimeInputEdit.h"
 
 #include "Data/AttendanceStorage.h"
@@ -62,10 +63,10 @@ QWidget* createTimeEditorRow(QTimeEdit* editor, QWidget* parent)
 QString dialogGroupStyle()
 {
     return QStringLiteral(
-        "ElaGroupBox { background: #ffffff; border: 1px solid #d8e3ee; border-radius: 6px;"
+        "ElaGroupBox { background: ${surface}; border: 1px solid ${border}; border-radius: 6px;"
         " margin-top: 9px; padding-top: 6px; }"
         "ElaGroupBox::title { subcontrol-origin: margin; left: 14px; padding: 0 5px;"
-        " color: #223550; font-weight: 600; }");
+        " color: ${text}; font-weight: 600; }");
 }
 
 struct NoteEmoji {
@@ -249,13 +250,7 @@ void TimeSettingDialog::updateRecordMode()
 
 void TimeSettingDialog::setupUI()
 {
-    setStyleSheet(QStringLiteral(
-        "ElaDialog { background: #f7f9fc; }"
-        "QTimeEdit { min-height: 32px; color: #223550; background: #ffffff;"
-        " border: 1px solid #cfdbe7; border-radius: 5px; padding: 0 9px; }"
-        "QTimeEdit:hover { border-color: #9ebdd8; }"
-        "QTimeEdit:focus { border-color: #5b9bd5; }"
-        "QTimeEdit:disabled { color: #9aa7b5; background: #f4f6f8; border-color: #e1e7ed; }"));
+    AppTheme::bindStyleSheet(this, QStringLiteral("ElaDialog { background: ${window}; }"));
 
     auto* mainLayout = new QVBoxLayout(this);
     mainLayout->setContentsMargins(20, 12, 20, 16);
@@ -276,7 +271,7 @@ void TimeSettingDialog::setupUI()
     mainLayout->addWidget(m_scrollArea, 1);
 
     auto* recordGroup = new ElaGroupBox(QStringLiteral("当日记录"), this);
-    recordGroup->setStyleSheet(dialogGroupStyle());
+    AppTheme::bindStyleSheet(recordGroup, dialogGroupStyle());
     auto* recordLayout = new QFormLayout(recordGroup);
     recordLayout->setContentsMargins(16, 21, 16, 14);
     recordLayout->setHorizontalSpacing(14);
@@ -313,7 +308,7 @@ void TimeSettingDialog::setupUI()
     m_needAverageCalCheckBox->setObjectName("includeWorkdayToggle");
     statisticsLayout->addWidget(m_needAverageCalCheckBox);
     auto* statisticsLabel = new QLabel(QStringLiteral("计入工作日统计"), statisticsRow);
-    statisticsLabel->setStyleSheet(QStringLiteral("color: #40566f; font-size: 13px;"));
+    AppTheme::bindStyleSheet(statisticsLabel, QStringLiteral("color: ${secondaryText}; font-size: 13px;"));
     statisticsLayout->addWidget(statisticsLabel);
     statisticsLayout->addSpacing(16);
     m_excludeStandardOvertime = new ElaToggleSwitch(statisticsRow);
@@ -321,8 +316,8 @@ void TimeSettingDialog::setupUI()
     m_excludeStandardOvertime->setToolTip(QStringLiteral("仅在不计入工作日统计时可用；开启后仅工作时段外的时间计为加班，关闭后全部工时计为加班。"));
     statisticsLayout->addWidget(m_excludeStandardOvertime);
     auto* exclusionLabel = new QLabel(QStringLiteral("标准时段不计加班"), statisticsRow);
-    exclusionLabel->setStyleSheet(QStringLiteral(
-        "QLabel { color: #40566f; font-size: 13px; } QLabel:disabled { color: #9aa7b5; }"));
+    AppTheme::bindStyleSheet(exclusionLabel, QStringLiteral(
+        "QLabel { color: ${secondaryText}; font-size: 13px; } QLabel:disabled { color: ${disabledText}; }"));
     exclusionLabel->setToolTip(m_excludeStandardOvertime->toolTip());
     statisticsLayout->addWidget(exclusionLabel);
     statisticsLayout->addStretch();
@@ -348,7 +343,7 @@ void TimeSettingDialog::setupUI()
 
     auto* scheduleGroup = new ElaGroupBox(QStringLiteral("当日作息"), this);
     m_workTimeSections[3] = scheduleGroup;
-    scheduleGroup->setStyleSheet(dialogGroupStyle());
+    AppTheme::bindStyleSheet(scheduleGroup, dialogGroupStyle());
     auto* scheduleLayout = new QVBoxLayout(scheduleGroup);
     scheduleLayout->setContentsMargins(16, 21, 16, 14);
     scheduleLayout->setSpacing(10);
@@ -359,7 +354,7 @@ void TimeSettingDialog::setupUI()
     toggleRow->addWidget(new QLabel(QStringLiteral("使用当天独立作息"), scheduleGroup));
     toggleRow->addStretch();
     m_scheduleHint = new QLabel(scheduleGroup);
-    m_scheduleHint->setStyleSheet(QStringLiteral("color: #7b8b9c; font-size: 11px;"));
+    AppTheme::bindStyleSheet(m_scheduleHint, QStringLiteral("color: ${mutedText}; font-size: 11px;"));
     toggleRow->addWidget(m_scheduleHint);
     scheduleLayout->addLayout(toggleRow);
     m_customScheduleBody = new QWidget(scheduleGroup);
@@ -397,19 +392,19 @@ void TimeSettingDialog::setupUI()
         scheduleGrid->addWidget(new QLabel(QStringLiteral("至"), m_customScheduleBody), row, 2);
     }
     auto* mealHint = new QLabel(QStringLiteral("离岗达到此时间计餐补"), m_customScheduleBody);
-    mealHint->setStyleSheet(QStringLiteral("color: #7b8b9c; font-size: 11px;"));
+    AppTheme::bindStyleSheet(mealHint, QStringLiteral("color: ${mutedText}; font-size: 11px;"));
     scheduleGrid->addWidget(mealHint, 3, 2, 1, 2);
     scheduleLayout->addWidget(m_customScheduleBody);
     m_contentLayout->addWidget(scheduleGroup);
 
     auto* resultGroup = new ElaGroupBox(QStringLiteral("自动计算"), this);
     m_workTimeSections[4] = resultGroup;
-    resultGroup->setStyleSheet(dialogGroupStyle());
+    AppTheme::bindStyleSheet(resultGroup, dialogGroupStyle());
     auto* resultLayout = new QVBoxLayout(resultGroup);
     resultLayout->setContentsMargins(16, 21, 16, 14);
     auto* resultBody = new QWidget(resultGroup);
     resultBody->setObjectName("workTimeResults");
-    resultBody->setStyleSheet(QStringLiteral("QWidget#workTimeResults { background: #f2f7fb; border-radius: 4px; }"));
+    AppTheme::bindStyleSheet(resultBody, QStringLiteral("QWidget#workTimeResults { background: ${subtleSurface}; border-radius: 4px; }"));
     auto* resultGrid = new QGridLayout(resultBody);
     resultGrid->setContentsMargins(10, 10, 10, 10);
     resultGrid->setHorizontalSpacing(8);
@@ -418,12 +413,12 @@ void TimeSettingDialog::setupUI()
         QStringLiteral("加班"), QStringLiteral("迟到"), QStringLiteral("早退")};
     for (int i = 0; i < 6; ++i) {
         auto* title = new QLabel(resultTitles[i], resultBody);
-        title->setStyleSheet(QStringLiteral("color: #63778d;"));
+        AppTheme::bindStyleSheet(title, QStringLiteral("color: ${mutedText};"));
         if (i == 3) m_overtimeTitle = title;
         m_resultValues[i] = new QLabel(resultBody);
-        m_resultValues[i]->setStyleSheet(i == 3
-            ? QStringLiteral("color: #1769aa; font-weight: 600;")
-            : QStringLiteral("color: #314861; font-weight: 600;"));
+        AppTheme::bindStyleSheet(m_resultValues[i], i == 3
+            ? QStringLiteral("color: ${accent}; font-weight: 600;")
+            : QStringLiteral("color: ${secondaryText}; font-weight: 600;"));
         resultGrid->addWidget(title, i / 2, (i % 2) * 2);
         resultGrid->addWidget(m_resultValues[i], i / 2, (i % 2) * 2 + 1, Qt::AlignRight);
     }
@@ -457,6 +452,9 @@ void TimeSettingDialog::setupUI()
     saveButton->setLightDefaultColor(QColor(QStringLiteral("#1769aa")));
     saveButton->setLightHoverColor(QColor(QStringLiteral("#0f5c9b")));
     saveButton->setLightTextColor(Qt::white);
+    saveButton->setDarkDefaultColor(QColor(QStringLiteral("#327db8")));
+    saveButton->setDarkHoverColor(QColor(QStringLiteral("#3f8dcc")));
+    saveButton->setDarkTextColor(Qt::white);
     connect(saveButton, &ElaPushButton::clicked, this, &TimeSettingDialog::saveAndClose);
     actionLayout->addWidget(saveButton);
     mainLayout->addWidget(m_actions);
@@ -495,8 +493,8 @@ void TimeSettingDialog::setupUI()
         auto* picker = new QFrame(nullptr, Qt::Popup | Qt::FramelessWindowHint);
         picker->setObjectName(QStringLiteral("noteEmojiPicker"));
         picker->setAttribute(Qt::WA_DeleteOnClose);
-        picker->setStyleSheet(QStringLiteral(
-            "QFrame#noteEmojiPicker { background: #ffffff; border: 1px solid #d4e2ef; border-radius: 8px; }"));
+        AppTheme::bindStyleSheet(picker, QStringLiteral(
+            "QFrame#noteEmojiPicker { background: ${surface}; border: 1px solid ${border}; border-radius: 8px; }"));
 
         auto* pickerLayout = new QGridLayout(picker);
         pickerLayout->setContentsMargins(8, 8, 8, 8);
@@ -529,6 +527,16 @@ void TimeSettingDialog::setupUI()
         }
         picker->show();
     });
+
+    // Keep editor colors local so ancestor styles cannot restore native light backgrounds.
+    for (auto* editor : findChildren<QTimeEdit*>()) {
+        AppTheme::bindStyleSheet(editor, QStringLiteral(
+            "QTimeEdit { min-height: 32px; color: ${text}; background: ${surface};"
+            " border: 1px solid ${border}; border-radius: 5px; padding: 0 9px; }"
+            "QTimeEdit:hover { border-color: ${hoverBorder}; }"
+            "QTimeEdit:focus { border-color: ${selectionBorder}; }"
+            "QTimeEdit:disabled { color: ${disabledText}; background: ${disabledSurface}; border-color: ${border}; }"));
+    }
 }
 
 void TimeSettingDialog::loadRecord()

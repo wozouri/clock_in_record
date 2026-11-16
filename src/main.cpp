@@ -3,6 +3,7 @@
 #include "Data/AttendanceStorage.h"
 #include "Utils/SingleInstanceGuard.h"
 #include "Utils/AppFont.h"
+#include "Utils/AppTheme.h"
 #include "Utils/ScreenLayout.h"
 
 #include <QApplication>
@@ -14,7 +15,6 @@
 #include <QTextStream>
 
 #include <ElaApplication.h>
-#include <ElaTheme.h>
 
 #ifdef Q_OS_WIN
 #include <Windows.h>
@@ -69,7 +69,7 @@ int main(int argc, char* argv[])
     }
 
     eApp->init();
-    eTheme->setThemeMode(ElaThemeType::Light);
+    AppTheme::initialize();
 
     initializeAppFont();
 

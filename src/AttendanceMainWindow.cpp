@@ -1,4 +1,5 @@
-﻿#include "AttendanceMainWindow.h"
+#include "AttendanceMainWindow.h"
+#include "Utils/AppTheme.h"
 #include "Utils/CustomCalendarWidget.h"
 #include "Utils/CalendarWorkspace.h"
 #include "Backup/BackupClient.h"
@@ -49,6 +50,7 @@
 #include <ElaNavigationBar.h>
 #include <ElaPushButton.h>
 #include <ElaTeachingTip.h>
+#include <ElaTheme.h>
 #include "Update/UpdateChecker.h"
 #include <algorithm>
 #include <memory>
@@ -336,7 +338,7 @@ protected:
     void paintEvent(QPaintEvent*) override {
         QPainter painter(this);
         painter.setRenderHint(QPainter::Antialiasing, false);
-        painter.fillRect(rect(), QColor(QStringLiteral("#DCE5F0")));
+        painter.fillRect(rect(), AppTheme::color(AppTheme::Color::Border));
         if (m_percent > 0) {
             const int filledWidth = qRound(width() * m_percent / 100.0);
             painter.fillRect(QRect(0, 0, filledWidth, height()),
@@ -710,8 +712,8 @@ void AttendanceMainWindow::setupUI() {
     auto* calendarPage = new QWidget();
     calendarPage->setObjectName(QStringLiteral("attendanceCalendarPage"));
     calendarPage->setMinimumSize(840, 600);
-    calendarPage->setStyleSheet(QStringLiteral(
-        "QWidget#attendanceCalendarPage { background: #f7f9fc; }"));
+    AppTheme::bindStyleSheet(calendarPage, QStringLiteral(
+        "QWidget#attendanceCalendarPage { background: ${window}; }"));
     auto* mainLayout = new QVBoxLayout(calendarPage);
     mainLayout->setContentsMargins(0, 0, 0, 0);
     mainLayout->setSpacing(0);
@@ -719,15 +721,22 @@ void AttendanceMainWindow::setupUI() {
     auto* toolbar = new QWidget(calendarPage);
     toolbar->setObjectName(QStringLiteral("attendanceToolbar"));
     toolbar->setFixedHeight(58);
-    toolbar->setStyleSheet(QStringLiteral(
-        "QWidget#attendanceToolbar { background: #ffffff; border-bottom: 1px solid #dce5ee; }"));
+    AppTheme::bindStyleSheet(toolbar, QStringLiteral(
+        "QWidget#attendanceToolbar { background: ${surface}; border-bottom: 1px solid ${border}; }"));
     auto* toolbarLayout = new QHBoxLayout(toolbar);
     toolbarLayout->setContentsMargins(16, 10, 16, 10);
     toolbarLayout->setSpacing(8);
 
-    const auto createToolbarButton = [toolbar](const QString& text, ElaIconType::IconName icon) {
+    const auto createToolbarButton = [this, toolbar](const QString& text, ElaIconType::IconName icon,
+                                                    bool primary = false) {
         auto* button = new ElaPushButton(text, toolbar);
-        button->setIcon(ElaIcon::getInstance()->getElaIcon(icon, 15));
+        const auto updateIcon = [button, icon, primary] {
+            button->setIcon(ElaIcon::getInstance()->getElaIcon(icon, 15,
+                primary ? QColor(Qt::white)
+                    : AppTheme::color(AppTheme::Color::Text)));
+        };
+        updateIcon();
+        QObject::connect(eTheme, &ElaTheme::themeModeChanged, button, updateIcon);
         button->setIconSize(QSize(15, 15));
         button->setFixedHeight(34);
         button->setCursor(Qt::PointingHandCursor);
@@ -735,11 +744,11 @@ void AttendanceMainWindow::setupUI() {
         // 按图标+间距+文字+内边距显式给定最小宽度，避免个别按钮被压窄裁字。
         button->setMinimumWidth(button->iconSize().width() + 6
             + button->fontMetrics().horizontalAdvance(text) + 26);
-        button->setStyleSheet(QStringLiteral(
-            "QPushButton { background: #ffffff; color: #223550; border: 1px solid #d8e1eb;"
+        AppTheme::bindStyleSheet(button, QStringLiteral(
+            "QPushButton { background: ${surface}; color: ${text}; border: 1px solid ${border};"
             " border-radius: 5px; padding: 0 13px; }"
-            "QPushButton:hover:enabled { background: #edf4fb; border-color: #b9cee2; }"
-            "QPushButton:disabled { color: #9aa5b1; background: #f5f6f8; border-color: #e0e5ea; }"));
+            "QPushButton:hover:enabled { background: ${hoverSurface}; border-color: ${hoverBorder}; }"
+            "QPushButton:disabled { color: ${disabledText}; background: ${disabledSurface}; border-color: ${border}; }"));
         return button;
     };
 
@@ -767,7 +776,7 @@ void AttendanceMainWindow::setupUI() {
     m_routeForwardButton->setEnabled(false);
     auto* routeSeparator = new QWidget(toolbar);
     routeSeparator->setFixedSize(1, 22);
-    routeSeparator->setStyleSheet(QStringLiteral("background: #dce5ee;"));
+    AppTheme::bindStyleSheet(routeSeparator, QStringLiteral("background: ${border};"));
     toolbarLayout->addWidget(m_routeBackButton);
     toolbarLayout->addWidget(m_routeForwardButton);
     toolbarLayout->addWidget(routeSeparator);
@@ -775,21 +784,21 @@ void AttendanceMainWindow::setupUI() {
 
     auto* applyBtn = createToolbarButton(QStringLiteral("粘贴"), ElaIconType::ClipboardCheck);
     m_applyCopiedButton = applyBtn;
-    applyBtn->setStyleSheet(QStringLiteral(
-        "QPushButton { background: #eaf4fd; color: #1769aa; border: 1px solid #9fc8ea;"
+    AppTheme::bindStyleSheet(applyBtn, QStringLiteral(
+        "QPushButton { background: ${accentSurface}; color: ${accent}; border: 1px solid ${selectionBorder};"
         " border-radius: 5px; padding: 0 13px; }"
-        "QPushButton:hover:enabled { background: #dceefd; border-color: #75b1df; }"
-        "QPushButton:disabled { color: #9aa5b1; background: #f5f6f8; border-color: #e0e5ea; }"));
+        "QPushButton:hover:enabled { background: ${accentHover}; border-color: ${selectionBorder}; }"
+        "QPushButton:disabled { color: ${disabledText}; background: ${disabledSurface}; border-color: ${border}; }"));
     connect(applyBtn, &ElaPushButton::clicked, this, &AttendanceMainWindow::onApplyCopiedClicked);
     toolbarLayout->addWidget(applyBtn);
 
     auto* deleteBtn = createToolbarButton(QStringLiteral("删除"), ElaIconType::TrashCan);
     m_deleteSelectedButton = deleteBtn;
-    deleteBtn->setStyleSheet(QStringLiteral(
-        "QPushButton { background: #ffffff; color: #b42318; border: 1px solid #e9b7b1;"
+    AppTheme::bindStyleSheet(deleteBtn, QStringLiteral(
+        "QPushButton { background: ${surface}; color: ${danger}; border: 1px solid ${dangerBorder};"
         " border-radius: 5px; padding: 0 13px; }"
-        "QPushButton:hover:enabled { background: #fff1f0; border-color: #dc8d84; }"
-        "QPushButton:disabled { color: #9aa5b1; background: #f5f6f8; border-color: #e0e5ea; }"));
+        "QPushButton:hover:enabled { background: ${dangerSurface}; border-color: ${dangerBorder}; }"
+        "QPushButton:disabled { color: ${disabledText}; background: ${disabledSurface}; border-color: ${border}; }"));
     connect(deleteBtn, &ElaPushButton::clicked, this, &AttendanceMainWindow::onDeleteSelectionRequested);
     toolbarLayout->addWidget(deleteBtn);
 
@@ -806,10 +815,10 @@ void AttendanceMainWindow::setupUI() {
     m_statsLabel->setFont(statsFont);
     m_statsLabel->setFixedHeight(30);
     m_statsLabel->setCursor(Qt::WhatsThisCursor);
-    m_statsLabel->setStyleSheet(QStringLiteral(
-        "QLabel { color: #36516f; background: #f3f7fb; border: 1px solid #d9e5f0;"
+    AppTheme::bindStyleSheet(m_statsLabel, QStringLiteral(
+        "QLabel { color: ${secondaryText}; background: ${subtleSurface}; border: 1px solid ${border};"
         " border-radius: 5px; padding: 0 12px; font-size: 13px; font-weight: 600; }"
-        "QLabel:hover { background: #eaf3fb; border-color: #b8cfe3; }"));
+        "QLabel:hover { background: ${hoverSurface}; border-color: ${hoverBorder}; }"));
     m_statsLabel->setSizePolicy(QSizePolicy::Minimum, QSizePolicy::Fixed);
     m_statsLabelFullText = QStringLiteral("平均加班 -- | 餐补 0 次");
     m_statsLabelCompactText = QStringLiteral("-- | 0");
@@ -819,14 +828,15 @@ void AttendanceMainWindow::setupUI() {
     m_statsLabel->installEventFilter(this);
     toolbarLayout->addWidget(m_statsLabel);
 
-    auto* currentMonthBtn = createToolbarButton(QStringLiteral("回到本月"), ElaIconType::CalendarDay);
+    auto* currentMonthBtn = createToolbarButton(QStringLiteral("回到本月"), ElaIconType::CalendarDay, true);
     currentMonthBtn->setToolTip(QStringLiteral("切换到当前月份"));
-    currentMonthBtn->setIcon(ElaIcon::getInstance()->getElaIcon(
-        ElaIconType::CalendarDay, 15, QColor(Qt::white)));
     currentMonthBtn->setLightDefaultColor(QColor(QStringLiteral("#1769aa")));
     currentMonthBtn->setLightHoverColor(QColor(QStringLiteral("#0f5c9b")));
     currentMonthBtn->setLightPressColor(QColor(QStringLiteral("#0b4d82")));
     currentMonthBtn->setLightTextColor(Qt::white);
+    currentMonthBtn->setDarkDefaultColor(QColor(QStringLiteral("#327db8")));
+    currentMonthBtn->setDarkHoverColor(QColor(QStringLiteral("#3f8dcc")));
+    currentMonthBtn->setDarkTextColor(Qt::white);
     currentMonthBtn->setVisible(false);
     m_showCurrentMonthButton = currentMonthBtn;
     connect(currentMonthBtn, &ElaPushButton::clicked,
@@ -838,7 +848,7 @@ void AttendanceMainWindow::setupUI() {
 
     auto* separator = new QWidget(toolbar);
     separator->setFixedSize(1, 22);
-    separator->setStyleSheet(QStringLiteral("background: #dce5ee;"));
+    AppTheme::bindStyleSheet(separator, QStringLiteral("background: ${border};"));
     toolbarLayout->addWidget(separator);
     toolbarLayout->addWidget(importBtn);
     toolbarLayout->addWidget(exportBtn);
@@ -1382,8 +1392,8 @@ void AttendanceMainWindow::updateContextTips(const QList<QDate>& dates) {
             m_copyContextTip->setTarget(m_copySelectedButton);
             m_copyContextTip->setIsLightDismiss(false);
             m_copyContextTip->setCloseButtonVisible(false);
-            m_copyContextTip->setStyleSheet(QStringLiteral(
-                "ElaTeachingTip QLabel { color: #1f2937; }"));
+            AppTheme::bindStyleSheet(m_copyContextTip, QStringLiteral(
+                "ElaTeachingTip QLabel { color: ${text}; }"));
             attachTipGlow(m_copyContextTip);
         }
         m_copyContextTip->setTitle(recordTipSummary(date, record));
@@ -1400,8 +1410,8 @@ void AttendanceMainWindow::updateContextTips(const QList<QDate>& dates) {
             m_applyContextTip->setTarget(m_applyCopiedButton);
             m_applyContextTip->setIsLightDismiss(false);
             m_applyContextTip->setCloseButtonVisible(false);
-            m_applyContextTip->setStyleSheet(QStringLiteral(
-                "ElaTeachingTip QLabel { color: #1f2937; }"));
+            AppTheme::bindStyleSheet(m_applyContextTip, QStringLiteral(
+                "ElaTeachingTip QLabel { color: ${text}; }"));
             attachTipGlow(m_applyContextTip);
         }
         m_applyContextTip->setTitle(recordTipSummary(m_copiedFromDate, m_copiedRecord));
@@ -1685,7 +1695,7 @@ void AttendanceMainWindow::setupSettingsPageTransition() {
     QWidget* overlayParent = m_centralStack->parentWidget();
     m_settingsOverlay = new QWidget(overlayParent);
     m_settingsOverlay->setAttribute(Qt::WA_StyledBackground, true);
-    m_settingsOverlay->setStyleSheet(QStringLiteral("background: #f7f9fc;"));
+    AppTheme::bindStyleSheet(m_settingsOverlay, QStringLiteral("background: ${window};"));
     m_workScheduleSettingsPage->setParent(m_settingsOverlay);
     m_workScheduleSettingsPage->setGeometry(m_settingsOverlay->rect());
     m_settingsOverlay->hide();
@@ -1865,7 +1875,7 @@ void AttendanceMainWindow::showAboutDialog()
     dialog->setFixedSize(410, 440);
     dialog->setAppBarHeight(42);
     dialog->setWindowButtonFlags(ElaAppBarType::CloseButtonHint);
-    dialog->setStyleSheet(QStringLiteral("ElaDialog { background: #ffffff; }"));
+    AppTheme::bindStyleSheet(dialog, QStringLiteral("ElaDialog { background: ${surface}; }"));
 
     auto* contentLayout = new QVBoxLayout(dialog);
     contentLayout->setContentsMargins(20, 12, 20, 18);
@@ -1880,7 +1890,7 @@ void AttendanceMainWindow::showAboutDialog()
     auto* titleLabel = new QLabel(QStringLiteral("关于软件"), dialog);
     titleLabel->setAlignment(Qt::AlignCenter);
     titleLabel->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
-    titleLabel->setStyleSheet(QStringLiteral("color: #172b4d; font-size: 20px; font-weight: 600;"));
+    AppTheme::bindStyleSheet(titleLabel, QStringLiteral("color: ${text}; font-size: 20px; font-weight: 600;"));
     contentLayout->addWidget(titleLabel);
     contentLayout->addSpacing(16);
 
@@ -1890,7 +1900,7 @@ void AttendanceMainWindow::showAboutDialog()
             .arg(QCoreApplication::applicationVersion()), dialog);
     detailsLabel->setWordWrap(true);
     detailsLabel->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
-    detailsLabel->setStyleSheet(QStringLiteral("color: #40566f; font-size: 13px; line-height: 1.55;"));
+    AppTheme::bindStyleSheet(detailsLabel, QStringLiteral("color: ${secondaryText}; font-size: 13px; line-height: 1.55;"));
     contentLayout->addWidget(detailsLabel);
     contentLayout->addStretch();
 
@@ -1900,6 +1910,9 @@ void AttendanceMainWindow::showAboutDialog()
     confirmButton->setLightDefaultColor(QColor(QStringLiteral("#1769aa")));
     confirmButton->setLightHoverColor(QColor(QStringLiteral("#0f5c9b")));
     confirmButton->setLightTextColor(Qt::white);
+    confirmButton->setDarkDefaultColor(QColor(QStringLiteral("#327db8")));
+    confirmButton->setDarkHoverColor(QColor(QStringLiteral("#3f8dcc")));
+    confirmButton->setDarkTextColor(Qt::white);
     connect(confirmButton, &ElaPushButton::clicked, dialog, &QDialog::accept);
     contentLayout->addWidget(confirmButton, 0, Qt::AlignHCenter);
     dialog->exec();
@@ -1925,12 +1938,12 @@ void AttendanceMainWindow::showUpdateConfirmDialog() {
     titleFont.setPixelSize(21);
     titleFont.setBold(true);
     title->setFont(titleFont);
-    title->setStyleSheet(QStringLiteral("color: #172b4d;"));
+    AppTheme::bindStyleSheet(title, QStringLiteral("color: ${text};"));
     titleRow->addWidget(title);
     auto* version = new QLabel(m_availableUpdate.version, content);
     version->setTextFormat(Qt::PlainText);
-    version->setStyleSheet(QStringLiteral(
-        "color: #1769aa; background: #edf5fc; border-radius: 5px;"
+    AppTheme::bindStyleSheet(version, QStringLiteral(
+        "color: ${accent}; background: ${accentSurface}; border-radius: 5px;"
         "padding: 4px 9px; font-size: 12px;"));
     titleRow->addWidget(version, 0, Qt::AlignVCenter);
     titleRow->addStretch();
@@ -1939,8 +1952,8 @@ void AttendanceMainWindow::showUpdateConfirmDialog() {
     notes->setObjectName(QStringLiteral("updateReleaseNotes"));
     notes->setFrameShape(QFrame::NoFrame);
     notes->setOpenLinks(false);
-    notes->setStyleSheet(QStringLiteral(
-        "QTextBrowser { border: none; background: transparent; color: #40516a; }"));
+    AppTheme::bindStyleSheet(notes, QStringLiteral(
+        "QTextBrowser { border: none; background: transparent; color: ${secondaryText}; }"));
     QFont notesFont = notes->font();
     notesFont.setPixelSize(13);
     notes->setFont(notesFont);
@@ -1963,7 +1976,6 @@ void AttendanceMainWindow::showUpdateConfirmDialog() {
             cursor.movePosition(QTextCursor::NextCharacter, QTextCursor::KeepAnchor, separator + 1);
             QTextCharFormat heading;
             heading.setFontWeight(QFont::DemiBold);
-            heading.setForeground(QColor(QStringLiteral("#172b4d")));
             cursor.mergeCharFormat(heading);
         }
     }
@@ -1977,7 +1989,7 @@ void AttendanceMainWindow::showUpdateConfirmDialog() {
     }
     layout->addWidget(notes);
     auto* hint = new QLabel(QStringLiteral("更新完成后程序将自动重启。"), content);
-    hint->setStyleSheet(QStringLiteral("color: #7a8799; font-size: 12px;"));
+    AppTheme::bindStyleSheet(hint, QStringLiteral("color: ${mutedText}; font-size: 12px;"));
     hint->setWordWrap(true);
     layout->addWidget(hint);
     content->setFixedHeight(layout->sizeHint().height());
@@ -2002,13 +2014,13 @@ void AttendanceMainWindow::startUpdateDownload() {
     progressDialog->setFixedSize(440, 198);
     progressDialog->setObjectName(QStringLiteral("clientUpdateProgress"));
     progressDialog->setAttribute(Qt::WA_DeleteOnClose);
-    progressDialog->setStyleSheet(QStringLiteral(
-        "QDialog#clientUpdateProgress { background: #F7FAFC; border: 1px solid #D6DFEA; }"
-        "QLabel#updateTitle { color: #13213A; font-size: 17px; font-weight: 600; }"
-        "QLabel#updateStatus { color: #53647A; font-size: 13px; }"
-        "QPushButton { color: #244B82; background: transparent; border: 1px solid #C5D3E4;"
+    AppTheme::bindStyleSheet(progressDialog, QStringLiteral(
+        "QDialog#clientUpdateProgress { background: ${window}; border: 1px solid ${border}; }"
+        "QLabel#updateTitle { color: ${text}; font-size: 17px; font-weight: 600; }"
+        "QLabel#updateStatus { color: ${secondaryText}; font-size: 13px; }"
+        "QPushButton { color: ${accent}; background: transparent; border: 1px solid ${border};"
         " padding: 6px 18px; }"
-        "QPushButton:hover { background: #E8F0FA; }"));
+        "QPushButton:hover { background: ${accentSurface}; }"));
 
     auto* layout = new QVBoxLayout(progressDialog);
     layout->setContentsMargins(26, 24, 26, 20);

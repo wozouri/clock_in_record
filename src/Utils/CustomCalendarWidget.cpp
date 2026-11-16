@@ -1,8 +1,10 @@
 #include "CustomCalendarWidget.h"
+#include "AppTheme.h"
 #include <QKeyEvent>
 
 #include "Data/AttendanceStorage.h"
 
+#include <ElaTheme.h>
 #include <ElaIcon.h>
 #include <ElaMenu.h>
 
@@ -68,8 +70,12 @@ protected:
 
 QColor softenedRecordColor(const QColor& color)
 {
+    if (AppTheme::isNightMode()) {
+        return AppTheme::color(color.isValid() && color.blue() > color.red()
+            ? AppTheme::Color::AlternateRecord : AppTheme::Color::Record);
+    }
     if (!color.isValid()) {
-        return QColor(QStringLiteral("#d8f6df"));
+        return AppTheme::color(AppTheme::Color::Record);
     }
 
     // Mix with white rather than increasing brightness: preserve the two record
@@ -94,7 +100,7 @@ public:
         setStyleSheet(QStringLiteral("QWidget#calendarNoteTip { border: none; background: transparent; }"));
         m_content->setTextFormat(Qt::PlainText);
         m_content->setWordWrap(true);
-        m_content->setStyleSheet(QStringLiteral("color: #31465d; font-size: 12px;"));
+        AppTheme::bindStyleSheet(m_content, QStringLiteral("color: ${secondaryText}; font-size: 12px;"));
         m_glowTimer.setInterval(42);
         connect(&m_glowTimer, &QTimer::timeout, this, [this] {
             m_glowPhase = (m_glowPhase + 1) % 96;
@@ -143,8 +149,8 @@ protected:
         painter.setPen(QPen(QColor(55, 131, 190, glowAlpha), 2));
         painter.setBrush(Qt::NoBrush);
         painter.drawRoundedRect(rect().adjusted(1, 1, -2, -2), 7, 7);
-        painter.setPen(QPen(QColor(QStringLiteral("#b9cad9"))));
-        painter.setBrush(QColor(QStringLiteral("#ffffff")));
+        painter.setPen(QPen(AppTheme::color(AppTheme::Color::HoverBorder)));
+        painter.setBrush(AppTheme::color(AppTheme::Color::Surface));
         painter.drawRoundedRect(rect().adjusted(1, 1, -2, -2), 6, 6);
     }
 
@@ -251,6 +257,7 @@ CustomCalendarWidget::CustomCalendarWidget(QWidget* parent, std::function<QDate(
     , m_todayProvider(todayProvider ? std::move(todayProvider) : [] { return QDate::currentDate(); })
     , m_pageDate(QDate(m_todayProvider().year(), m_todayProvider().month(), 1))
 {
+    connect(eTheme, &ElaTheme::themeModeChanged, this, [this] { update(); });
     setMouseTracking(true);
     setFocusPolicy(Qt::StrongFocus);
     m_noteTip = new CalendarNoteTip(this);
@@ -408,21 +415,21 @@ void CustomCalendarWidget::paintEvent(QPaintEvent* event)
 
     QPainter painter(this);
     painter.setRenderHint(QPainter::Antialiasing);
-    painter.fillRect(rect(), QColor(QStringLiteral("#ffffff")));
+    painter.fillRect(rect(), AppTheme::color(AppTheme::Color::Surface));
 
     const QRect monthHeader(0, 0, width(), kMonthHeaderHeight);
-    painter.setPen(QColor(QStringLiteral("#dfe7ef")));
+    painter.setPen(AppTheme::color(AppTheme::Color::Border));
     painter.drawLine(monthHeader.bottomLeft(), monthHeader.bottomRight());
 
     const auto drawNavigationButton = [&painter](const QRect& buttonRect, bool pointsLeft, bool hovered) {
         painter.save();
-        painter.setPen(QPen(hovered ? QColor(QStringLiteral("#8eb9dc"))
-                                    : QColor(QStringLiteral("#dbe6ef"))));
-        painter.setBrush(hovered ? QColor(QStringLiteral("#dceefd"))
-                                 : QColor(QStringLiteral("#f7fafc")));
+        painter.setPen(QPen(hovered ? AppTheme::color(AppTheme::Color::HoverBorder)
+                                    : AppTheme::color(AppTheme::Color::Border)));
+        painter.setBrush(hovered ? AppTheme::color(AppTheme::Color::AccentHover)
+                                 : AppTheme::color(AppTheme::Color::Window));
         painter.drawRoundedRect(buttonRect, 5, 5);
-        painter.setPen(QPen(hovered ? QColor(QStringLiteral("#1769aa"))
-                                    : QColor(QStringLiteral("#52708e")), 2,
+        painter.setPen(QPen(hovered ? AppTheme::color(AppTheme::Color::Accent)
+                                    : AppTheme::color(AppTheme::Color::MutedText), 2,
             Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
         const QPoint center = buttonRect.center();
         const int horizontalOffset = 3;
@@ -448,7 +455,7 @@ void CustomCalendarWidget::paintEvent(QPaintEvent* event)
     titleFont.setPixelSize(width() >= 1280 && height() >= 740 ? 22 : 20);
     titleFont.setBold(true);
     painter.setFont(titleFont);
-    painter.setPen(QColor(QStringLiteral("#172b4d")));
+    painter.setPen(AppTheme::color(AppTheme::Color::Text));
     painter.drawText(monthHeader, Qt::AlignCenter, m_yearOverviewVisible
         ? QStringLiteral("%1 年").arg(m_pageDate.year())
         : QStringLiteral("%1 年 %2 月").arg(m_pageDate.year()).arg(m_pageDate.month()));
@@ -457,9 +464,9 @@ void CustomCalendarWidget::paintEvent(QPaintEvent* event)
     painter.save();
     const QRect viewButton = yearOverviewButtonRect();
     painter.setPen(Qt::NoPen);
-    painter.setBrush(QColor(QStringLiteral("#eef5fb")));
+    painter.setBrush(AppTheme::color(AppTheme::Color::SubtleSurface));
     painter.drawRoundedRect(viewButton, 5, 5);
-    painter.setPen(QColor(QStringLiteral("#28649a")));
+    painter.setPen(AppTheme::color(AppTheme::Color::Accent));
     QFont viewButtonFont = painter.font();
     viewButtonFont.setPixelSize(12);
     viewButtonFont.setBold(true);
@@ -474,7 +481,7 @@ void CustomCalendarWidget::paintEvent(QPaintEvent* event)
     }
 
     const QRect weekdayHeader = weekHeaderRect();
-    painter.fillRect(weekdayHeader, QColor(QStringLiteral("#f8fafc")));
+    painter.fillRect(weekdayHeader, AppTheme::color(AppTheme::Color::Window));
     QFont weekdayFont = painter.font();
     weekdayFont.setPixelSize(width() >= 1280 && height() >= 740 ? 14 : 13);
     weekdayFont.setBold(true);
@@ -483,11 +490,11 @@ void CustomCalendarWidget::paintEvent(QPaintEvent* event)
         const int weekday = (static_cast<int>(m_firstDayOfWeek) - 1 + column) % kGridColumns;
         const QRect weekdayRect(weekdayHeader.left() + column * weekdayHeader.width() / kGridColumns,
             weekdayHeader.top(), weekdayHeader.width() / kGridColumns, weekdayHeader.height());
-        painter.setPen(weekday >= 5 ? QColor(QStringLiteral("#d44d44"))
-                                    : QColor(QStringLiteral("#50657d")));
+        painter.setPen(weekday >= 5 ? AppTheme::color(AppTheme::Color::Danger)
+                                    : AppTheme::color(AppTheme::Color::SecondaryText));
         painter.drawText(weekdayRect, Qt::AlignCenter, kWeekdayNames.at(weekday));
     }
-    painter.setPen(QColor(QStringLiteral("#dfe7ef")));
+    painter.setPen(AppTheme::color(AppTheme::Color::Border));
     painter.drawLine(weekdayHeader.bottomLeft(), weekdayHeader.bottomRight());
 
     const QDate firstDate = firstVisibleDate();
@@ -507,7 +514,7 @@ void CustomCalendarWidget::paintEvent(QPaintEvent* event)
                 && dayData.value(QStringLiteral("hasWorkTimes"), true).toBool();
 
             if (m_gridVisible) {
-                painter.setPen(QColor(QStringLiteral("#e5ebf1")));
+                painter.setPen(AppTheme::color(AppTheme::Color::Border));
                 painter.setBrush(Qt::NoBrush);
                 painter.drawRect(cell.adjusted(0, 0, -1, -1));
             }
@@ -533,35 +540,35 @@ void CustomCalendarWidget::paintEvent(QPaintEvent* event)
             } else if (selected || (hovered && isCurrentMonth)) {
                 painter.save();
                 painter.setPen(Qt::NoPen);
-                painter.setBrush(selected ? QColor(QStringLiteral("#d9ecfb"))
-                                          : QColor(QStringLiteral("#f2f7fc")));
+                painter.setBrush(selected ? AppTheme::color(AppTheme::Color::Selection)
+                                          : AppTheme::color(AppTheme::Color::HoverSurface));
                 painter.drawRoundedRect(cardRect, 8, 8);
                 painter.restore();
             }
 
             if (hasRecord && hovered && !selected) {
-                painter.setPen(QPen(QColor(QStringLiteral("#8eafc5")), 1));
+                painter.setPen(QPen(AppTheme::color(AppTheme::Color::HoverBorder), 1));
                 painter.setBrush(Qt::NoBrush);
                 painter.drawRoundedRect(cardRect.adjusted(1, 1, -1, -1), 7, 7);
             }
 
             if (selected) {
                 painter.save();
-                painter.setPen(QPen(QColor(QStringLiteral("#1f79bd")), 2));
+                painter.setPen(QPen(AppTheme::color(AppTheme::Color::SelectionBorder), 2));
                 painter.setBrush(Qt::NoBrush);
                 painter.drawRoundedRect(cardRect.adjusted(1, 1, -1, -1), 7, 7);
                 painter.restore();
             }
             if (contextMenuTarget) {
                 painter.save();
-                painter.setPen(QPen(QColor(QStringLiteral("#7867aa")), 1,
+                painter.setPen(QPen(AppTheme::color(AppTheme::Color::Purple), 1,
                     Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
                 painter.setBrush(Qt::NoBrush);
                 painter.drawRoundedRect(cardRect.adjusted(4, 4, -4, -4), 3, 3);
                 painter.restore();
             } else if (!selected && date == today) {
                 painter.save();
-                painter.setPen(QPen(QColor(QStringLiteral("#5d9ed4")), 1));
+                painter.setPen(QPen(AppTheme::color(AppTheme::Color::SelectionBorder), 1));
                 painter.setBrush(Qt::NoBrush);
                 painter.drawRoundedRect(cardRect.adjusted(1, 1, -1, -1), 7, 7);
                 painter.restore();
@@ -572,15 +579,15 @@ void CustomCalendarWidget::paintEvent(QPaintEvent* event)
             dayFont.setPixelSize(compact ? 12 : 13 + enlargement);
             dayFont.setBold(selected || date == today);
             painter.setFont(dayFont);
-            QColor dayColor = QColor(QStringLiteral("#263b53"));
+            QColor dayColor = AppTheme::color(AppTheme::Color::Text);
             if (!isCurrentMonth) {
-                dayColor = QColor(QStringLiteral("#b0bac5"));
+                dayColor = AppTheme::color(AppTheme::Color::DisabledText);
             } else if (isWeekend) {
-                dayColor = QColor(QStringLiteral("#d64d4d"));
+                dayColor = AppTheme::color(AppTheme::Color::Danger);
             }
             if (date == today) {
                 painter.setPen(Qt::NoPen);
-                painter.setBrush(QColor(QStringLiteral("#1769aa")));
+                painter.setBrush(AppTheme::color(AppTheme::Color::Today));
                 painter.drawEllipse(dateRect);
                 painter.setPen(Qt::white);
                 painter.drawText(dateRect, Qt::AlignCenter, QString::number(date.day()));
@@ -608,10 +615,10 @@ void CustomCalendarWidget::paintEvent(QPaintEvent* event)
                 const QRect arrivalRect(timeLeft, timeTop, timeRight - timeLeft + 1, lineHeight);
                 const QRect departureRect(timeLeft, timeTop + lineHeight + (compact ? 0 : 2),
                     arrivalRect.width(), lineHeight);
-                painter.setPen(QColor(QStringLiteral("#245c78")));
+                painter.setPen(AppTheme::color(AppTheme::Color::Accent));
                 painter.drawText(arrivalRect, Qt::AlignCenter,
                     dayData.value(QStringLiteral("arrivalTime")).toString());
-                painter.setPen(QColor(QStringLiteral("#526777")));
+                painter.setPen(AppTheme::color(AppTheme::Color::SecondaryText));
                 painter.drawText(departureRect, Qt::AlignCenter,
                     dayData.value(QStringLiteral("departureTime")).toString());
                 painter.restore();
@@ -620,7 +627,7 @@ void CustomCalendarWidget::paintEvent(QPaintEvent* event)
             if (dayData.value(QStringLiteral("hasNote")).toBool()) {
                 painter.save();
                 painter.setPen(Qt::NoPen);
-                painter.setBrush(QColor(QStringLiteral("#c98a30")));
+                painter.setBrush(AppTheme::color(AppTheme::Color::Note));
                 painter.drawEllipse(QPoint(cardRect.right() - padding - 3, dateRect.center().y()), 3, 3);
                 painter.restore();
             }
@@ -629,13 +636,13 @@ void CustomCalendarWidget::paintEvent(QPaintEvent* event)
                 painter.save();
                 const QRect marker(cardRect.right() + 1 - padding - markerWidth, footerY, markerWidth, markerHeight);
                 painter.setPen(Qt::NoPen);
-                painter.setBrush(QColor(QStringLiteral("#eee8f7")));
+                painter.setBrush(AppTheme::color(AppTheme::Color::PurpleSurface));
                 painter.drawRoundedRect(marker, 4, 4);
                 QFont font = painter.font();
                 font.setPixelSize(markerFontSize);
                 font.setStyleStrategy(QFont::StyleStrategy(QFont::PreferAntialias | QFont::NoSubpixelAntialias));
                 painter.setFont(font);
-                painter.setPen(QColor(QStringLiteral("#74559c")));
+                painter.setPen(AppTheme::color(AppTheme::Color::Purple));
                 painter.drawText(marker, Qt::AlignCenter, QStringLiteral("作"));
                 painter.restore();
             }
@@ -643,14 +650,14 @@ void CustomCalendarWidget::paintEvent(QPaintEvent* event)
                 painter.save();
                 const QRect mealAllowanceRect(cardRect.left() + padding, footerY, markerWidth, markerHeight);
                 painter.setPen(Qt::NoPen);
-                painter.setBrush(QColor(QStringLiteral("#fff0dc")));
+                painter.setBrush(AppTheme::color(AppTheme::Color::WarningSurface));
                 painter.drawRoundedRect(mealAllowanceRect, 4, 4);
                 QFont mealAllowanceFont = painter.font();
                 mealAllowanceFont.setPixelSize(markerFontSize);
                 mealAllowanceFont.setStyleStrategy(QFont::StyleStrategy(QFont::PreferAntialias | QFont::NoSubpixelAntialias));
                 mealAllowanceFont.setBold(false);
                 painter.setFont(mealAllowanceFont);
-                painter.setPen(QColor(QStringLiteral("#a86c22")));
+                painter.setPen(AppTheme::color(AppTheme::Color::Warning));
                 painter.drawText(mealAllowanceRect, Qt::AlignCenter, QStringLiteral("餐"));
                 painter.restore();
             }
@@ -659,7 +666,7 @@ void CustomCalendarWidget::paintEvent(QPaintEvent* event)
 
     if (m_dragSelectionActive && !m_dragSelectionRect.isNull()) {
         painter.save();
-        painter.setPen(QPen(QColor(QStringLiteral("#3c8bc8")), 1, Qt::DashLine));
+        painter.setPen(QPen(AppTheme::color(AppTheme::Color::SelectionBorder), 1, Qt::DashLine));
         painter.setBrush(QColor(64, 145, 206, 32));
         painter.drawRect(m_dragSelectionRect.normalized());
         painter.restore();
@@ -1074,18 +1081,18 @@ void CustomCalendarWidget::paintYearOverview(QPainter& painter)
         const QRect monthRect = monthPreviewRect(month);
         const bool isActiveMonth = month == m_pageDate.month();
         painter.save();
-        painter.setPen(QPen(isActiveMonth ? QColor(QStringLiteral("#8bbce3"))
-                                          : QColor(QStringLiteral("#dfe7ef"))));
-        painter.setBrush(QColor(QStringLiteral("#ffffff")));
+        painter.setPen(QPen(isActiveMonth ? AppTheme::color(AppTheme::Color::SelectionBorder)
+                                          : AppTheme::color(AppTheme::Color::Border)));
+        painter.setBrush(AppTheme::color(AppTheme::Color::Surface));
         painter.drawRoundedRect(monthRect, 6, 6);
 
         const QRect titleRect(monthRect.left(), monthRect.top(), monthRect.width(), 24);
         painter.setPen(Qt::NoPen);
-        painter.setBrush(isActiveMonth ? QColor(QStringLiteral("#eaf4fd"))
-                                       : QColor(QStringLiteral("#f7f9fc")));
+        painter.setBrush(isActiveMonth ? AppTheme::color(AppTheme::Color::AccentSurface)
+                                       : AppTheme::color(AppTheme::Color::Window));
         painter.drawRoundedRect(titleRect.adjusted(1, 1, -1, 0), 5, 5);
-        painter.setPen(isActiveMonth ? QColor(QStringLiteral("#1769aa"))
-                                     : QColor(QStringLiteral("#334e68")));
+        painter.setPen(isActiveMonth ? AppTheme::color(AppTheme::Color::Accent)
+                                     : AppTheme::color(AppTheme::Color::Text));
         QFont titleFont = painter.font();
         titleFont.setPixelSize(12);
         titleFont.setBold(true);
@@ -1116,18 +1123,18 @@ void CustomCalendarWidget::paintYearOverview(QPainter& painter)
 
                 if (m_yearRecordDates.contains(date)) {
                     painter.setPen(Qt::NoPen);
-                    painter.setBrush(QColor(QStringLiteral("#d8f4df")));
+                    painter.setBrush(AppTheme::color(AppTheme::Color::Record));
                     painter.drawRoundedRect(dayRect.adjusted(1, 1, -1, -1), 2, 2);
                 }
                 if (date == today) {
-                    painter.setPen(QPen(QColor(QStringLiteral("#4d97cf")), 1));
+                    painter.setPen(QPen(AppTheme::color(AppTheme::Color::SelectionBorder), 1));
                     painter.setBrush(Qt::NoBrush);
                     painter.drawRoundedRect(dayRect.adjusted(1, 1, -1, -1), 2, 2);
                 }
 
                 const bool isWeekend = date.dayOfWeek() == Qt::Saturday || date.dayOfWeek() == Qt::Sunday;
-                painter.setPen(isWeekend ? QColor(QStringLiteral("#d64d4d"))
-                                         : QColor(QStringLiteral("#52657a")));
+                painter.setPen(isWeekend ? AppTheme::color(AppTheme::Color::Danger)
+                                         : AppTheme::color(AppTheme::Color::SecondaryText));
                 painter.drawText(dayRect, Qt::AlignCenter, QString::number(date.day()));
             }
         }
