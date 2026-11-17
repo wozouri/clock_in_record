@@ -615,7 +615,7 @@ void CustomCalendarWidget::paintEvent(QPaintEvent* event)
                 const QRect arrivalRect(timeLeft, timeTop, timeRight - timeLeft + 1, lineHeight);
                 const QRect departureRect(timeLeft, timeTop + lineHeight + (compact ? 0 : 2),
                     arrivalRect.width(), lineHeight);
-                painter.setPen(AppTheme::color(AppTheme::Color::Accent));
+                painter.setPen(AppTheme::color(AppTheme::Color::ArrivalText));
                 painter.drawText(arrivalRect, Qt::AlignCenter,
                     dayData.value(QStringLiteral("arrivalTime")).toString());
                 painter.setPen(AppTheme::color(AppTheme::Color::SecondaryText));

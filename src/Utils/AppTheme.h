@@ -11,7 +11,7 @@ enum class Color {
     Text, SecondaryText, MutedText, DisabledText, DisabledSurface,
     Accent, AccentSurface, AccentHover, Selection, SelectionBorder,
     Danger, DangerSurface, DangerBorder, Warning, WarningSurface, WarningBorder,
-    Purple, PurpleSurface, Record, AlternateRecord, Today, Note
+    Purple, PurpleSurface, Record, AlternateRecord, Today, Note, ArrivalText
 };
 
 void initialize();
