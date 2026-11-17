@@ -1,6 +1,6 @@
 ; 工时簿更新服务 Windows 安装程序。
 #ifndef AppVersion
-  #define AppVersion "v2026.11.04"
+  #define AppVersion "v2026.11.17"
 #endif
 #ifndef SourceDir
   #define SourceDir "..\dist\AttendanceUpdateService"

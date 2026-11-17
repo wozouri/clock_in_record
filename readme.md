@@ -85,7 +85,7 @@ cmake --build out/build/x64-RelWithDebInfo --config RelWithDebInfo
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\make_update_package.ps1 `
   -SourceDir out\build\vs2022-RelWithDebInfo\RelWithDebInfo `
-  -Version v2026.11.04 `
+  -Version v2026.11.17 `
   -UpdatesDir D:\AttendanceUpdates
 ```
 
