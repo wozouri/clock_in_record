@@ -41,7 +41,7 @@ constexpr ThemeColor colors[] = {
     {"purple", "#74559c", "#c6acec"},
     {"purpleSurface", "#eee8f7", "#42374f"},
     {"record", "#d8f6df", "#294735"},
-    {"alternateRecord", "#d5fef4", "#254840"},
+    {"alternateRecord", "#d5fef4", "#344b6b"},
     {"today", "#1769aa", "#327db8"},
     {"note", "#c98a30", "#e8b260"}
 };

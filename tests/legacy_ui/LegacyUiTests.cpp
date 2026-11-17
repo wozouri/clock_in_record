@@ -207,7 +207,7 @@ private slots:
         const QRect cell = calendar.cellRect(index / 7, index % 7);
         QCOMPARE(pixel(month, cell.topLeft() + QPoint(12, cell.height() / 2)), QColor("#294735"));
         const QRect nextCell = calendar.cellRect((index + 1) / 7, (index + 1) % 7);
-        QCOMPARE(pixel(month, nextCell.topLeft() + QPoint(12, nextCell.height() / 2)), QColor("#254840"));
+        QCOMPARE(pixel(month, nextCell.topLeft() + QPoint(12, nextCell.height() / 2)), QColor("#344b6b"));
         if (!capture.isEmpty()) month.save(capture + "-calendar.png");
         calendar.setYearOverviewVisible(true);
         const QImage year = calendar.grab().toImage();
