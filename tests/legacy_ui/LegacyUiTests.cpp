@@ -10,6 +10,7 @@
 #include <ElaTheme.h>
 #include <ElaApplication.h>
 #include <ElaPushButton.h>
+#include <ElaToolButton.h>
 #include <ElaScrollArea.h>
 #include <ElaToggleSwitch.h>
 #include <ElaPlainTextEdit.h>
@@ -144,6 +145,41 @@ private slots:
         QCOMPARE(QSettings().value(QStringLiteral("appearance/theme")).toString(), QStringLiteral("light"));
         QVERIFY(page.styleSheet().contains(QStringLiteral("#f7f9fc")));
         QCOMPARE(editor->time(), QTime(8, 37));
+    }
+    void titleBarThemeToggleStaysInSync() {
+        auto* button = m_window->findChild<ElaToolButton*>(QStringLiteral("titleBarThemeToggle"));
+        auto* settingsToggle = m_window->m_workScheduleSettingsPage
+            ->findChild<ElaToggleSwitch*>(QStringLiteral("nightModeToggle"));
+        QVERIFY(button && settingsToggle);
+        QVERIFY(button->isVisible());
+        QVERIFY(m_window->m_updateToolsHost->rect().contains(button->geometry()));
+        QVERIFY(button->geometry().right() < m_window->m_updateCheckButton->geometry().left());
+        QCOMPARE(button->toolTip(), QStringLiteral("切换到夜间主题"));
+
+        QTest::mouseClick(button, Qt::LeftButton);
+        QVERIFY(AppTheme::isNightMode());
+        QVERIFY(settingsToggle->getIsToggled());
+        QCOMPARE(QSettings().value(QStringLiteral("appearance/theme")).toString(), QStringLiteral("dark"));
+        QCOMPARE(button->accessibleName(), QStringLiteral("切换到日间主题"));
+        const auto capture = qEnvironmentVariable("ATTENDANCE_TITLEBAR_THEME_CAPTURE");
+        if (!capture.isEmpty())
+            m_window->grab(QRect(0, 0, m_window->width(), 48)).save(capture + "-dark.png");
+
+        settingsToggle->setIsToggled(false);
+        QVERIFY(!AppTheme::isNightMode());
+        QCOMPARE(button->toolTip(), QStringLiteral("切换到夜间主题"));
+        QCOMPARE(QSettings().value(QStringLiteral("appearance/theme")).toString(), QStringLiteral("light"));
+        if (!capture.isEmpty())
+            m_window->grab(QRect(0, 0, m_window->width(), 48)).save(capture + "-light.png");
+
+        button->setFocus();
+        QTest::keyClick(button, Qt::Key_Space);
+        QVERIFY(AppTheme::isNightMode());
+        QVERIFY(settingsToggle->getIsToggled());
+        QTest::mouseClick(button, Qt::LeftButton);
+        QVERIFY(!AppTheme::isNightMode());
+        QVERIFY(!settingsToggle->getIsToggled());
+        QVERIFY(m_window->m_updateCheckButton->isEnabled());
     }
     void nightThemeCalendarAndEditorRemainReadable() {
         AppTheme::setNightMode(true);

@@ -35,5 +35,6 @@ add_test(NAME update_ui COMMAND legacy_ui_tests -platform offscreen
     updateDialogKeepsLongNotesScrollable startupChecksForUpdatesAndNotifies -o -,txt)
 set_tests_properties(update_ui PROPERTIES TIMEOUT 20)
 add_test(NAME theme_ui COMMAND legacy_ui_tests -platform windows
-    nightThemeSwitchPersistsAndRefreshesWidgets nightThemeCalendarAndEditorRemainReadable -o -,txt)
+    nightThemeSwitchPersistsAndRefreshesWidgets titleBarThemeToggleStaysInSync
+    nightThemeCalendarAndEditorRemainReadable -o -,txt)
 set_tests_properties(theme_ui PROPERTIES TIMEOUT 20)

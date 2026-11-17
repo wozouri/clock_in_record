@@ -1626,6 +1626,22 @@ void AttendanceMainWindow::setupUpdateUi() {
     };
     m_updateCheckButton = makeAppBarButton(ElaIconType::ArrowsRotate);
     m_updateCheckButton->setToolTip(QStringLiteral("检查更新"));
+    auto* themeToggleButton = makeAppBarButton(ElaIconType::Moon);
+    themeToggleButton->setObjectName(QStringLiteral("titleBarThemeToggle"));
+    themeToggleButton->setFocusPolicy(Qt::StrongFocus);
+    const auto updateThemeToggle = [themeToggleButton] {
+        const bool nightMode = AppTheme::isNightMode();
+        themeToggleButton->setElaIcon(nightMode ? ElaIconType::Sun : ElaIconType::Moon);
+        const QString action = nightMode ? QStringLiteral("切换到日间主题")
+                                         : QStringLiteral("切换到夜间主题");
+        themeToggleButton->setToolTip(action);
+        themeToggleButton->setAccessibleName(action);
+    };
+    updateThemeToggle();
+    connect(eTheme, &ElaTheme::themeModeChanged, themeToggleButton, updateThemeToggle);
+    connect(themeToggleButton, &ElaToolButton::clicked, this, [] {
+        AppTheme::setNightMode(!AppTheme::isNightMode());
+    });
     // 角标用 ElaIconButton 以支持醒目的独立配色；更新就绪时常亮绿色。
     m_updateIndicatorButton =
         new ElaIconButton(ElaIconType::CloudArrowDown, 18, 40, 48, m_updateToolsHost);
@@ -1635,6 +1651,7 @@ void AttendanceMainWindow::setupUpdateUi() {
     m_updateIndicatorButton->setDarkIconColor(QColor(QStringLiteral("#3DD05C")));
     m_updateIndicatorButton->setDarkHoverIconColor(QColor(QStringLiteral("#6BE384")));
     m_updateIndicatorButton->setVisible(false);
+    toolsLayout->addWidget(themeToggleButton);
     toolsLayout->addWidget(m_updateCheckButton);
     toolsLayout->addWidget(m_updateIndicatorButton);
     setCustomWidget(ElaAppBarType::RightArea, m_updateToolsHost);
