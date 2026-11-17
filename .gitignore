@@ -21,6 +21,7 @@ release/
 
 # CMake 生成的文件
 CMakeCache.txt
+CMakeUserPresets.json
 CMakeFiles/
 cmake_install.cmake
 Makefile

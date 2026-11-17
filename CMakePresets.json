@@ -32,9 +32,19 @@
     {
       "name": "x64-release",
       "displayName": "x64 Release",
-      "description": "使用 Visual Studio 开发环境定向到 Windows (64 位)。(RelWithDebInfo)",
-      "inherits": "x64-debug",
-      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
+      "description": "Windows x64 / Qt 5 / MSVC Release，使用本机 Qt 和 vcpkg 依赖。",
+      "inherits": "windows-base",
+      "architecture": { "value": "x64", "strategy": "external" },
+      "toolchainFile": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+      "environment": {
+        "PATH": "$env{QT_MSVC_ROOT}/bin;$penv{PATH}",
+        "QT_PLUGIN_PATH": "$env{QT_MSVC_ROOT}/plugins"
+      },
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_PREFIX_PATH": "$env{QT_MSVC_ROOT}",
+        "VCPKG_TARGET_TRIPLET": "x64-windows"
+      }
     },
     {
       "name": "x86-debug",
@@ -53,6 +63,20 @@
       "description": "用 Visual Studio 开发环境定向到 Windows (32 位)。(RelWithDebInfo)",
       "inherits": "x86-debug",
       "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
+    }
+  ],
+  "buildPresets": [
+    { "name": "x64-release", "configurePreset": "x64-release" }
+  ],
+  "testPresets": [
+    {
+      "name": "x64-release",
+      "configurePreset": "x64-release",
+      "output": { "outputOnFailure": true },
+      "environment": {
+        "PATH": "${sourceDir}/out/build/${presetName};$env{QT_MSVC_ROOT}/bin;$penv{PATH}",
+        "QT_PLUGIN_PATH": "$env{QT_MSVC_ROOT}/plugins"
+      }
     }
   ]
 }
