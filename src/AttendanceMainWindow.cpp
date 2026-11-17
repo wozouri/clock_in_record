@@ -1631,7 +1631,7 @@ void AttendanceMainWindow::setupUpdateUi() {
     themeToggleButton->setFocusPolicy(Qt::StrongFocus);
     const auto updateThemeToggle = [themeToggleButton] {
         const bool nightMode = AppTheme::isNightMode();
-        themeToggleButton->setElaIcon(nightMode ? ElaIconType::Sun : ElaIconType::Moon);
+        themeToggleButton->setElaIcon(nightMode ? ElaIconType::SunBright : ElaIconType::Moon);
         const QString action = nightMode ? QStringLiteral("切换到日间主题")
                                          : QStringLiteral("切换到夜间主题");
         themeToggleButton->setToolTip(action);
