@@ -19,23 +19,20 @@
       }
     },
     {
-      "name": "x64-debug",
-      "displayName": "x64 Debug",
-      "description": "使用 Visual Studio 开发环境定向到 Windows (64 位)。(Debug)",
-      "inherits": "windows-base",
-      "architecture": {
-        "value": "x64",
-        "strategy": "external"
-      },
-      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
-    },
-    {
       "name": "x64-release",
       "displayName": "x64 Release",
       "description": "Windows x64 / Qt 5 / MSVC Release，使用本机 Qt 和 vcpkg 依赖。",
       "inherits": "windows-base",
       "architecture": { "value": "x64", "strategy": "external" },
       "toolchainFile": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+      "condition": {
+        "type": "allOf",
+        "conditions": [
+          { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Windows" },
+          { "type": "notEquals", "lhs": "$env{QT_MSVC_ROOT}", "rhs": "" },
+          { "type": "notEquals", "lhs": "$env{VCPKG_ROOT}", "rhs": "" }
+        ]
+      },
       "environment": {
         "PATH": "$env{QT_MSVC_ROOT}/bin;$penv{PATH}",
         "QT_PLUGIN_PATH": "$env{QT_MSVC_ROOT}/plugins"
@@ -45,24 +42,6 @@
         "CMAKE_PREFIX_PATH": "$env{QT_MSVC_ROOT}",
         "VCPKG_TARGET_TRIPLET": "x64-windows"
       }
-    },
-    {
-      "name": "x86-debug",
-      "displayName": "x86 Debug",
-      "description": "用 Visual Studio 开发环境定向到 Windows (32 位)。(Debug)",
-      "inherits": "windows-base",
-      "architecture": {
-        "value": "x86",
-        "strategy": "external"
-      },
-      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
-    },
-    {
-      "name": "x86-release",
-      "displayName": "x86 Release",
-      "description": "用 Visual Studio 开发环境定向到 Windows (32 位)。(RelWithDebInfo)",
-      "inherits": "x86-debug",
-      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
     }
   ],
   "buildPresets": [

@@ -1,7 +1,8 @@
 # 本地构建（Windows x64 Release）
 
 优先使用 **x64 Release**，与仓库内 Windows x64 / Qt 5.15.2 / MSVC Release
-预编译 Ela SDK 配套。现有 Debug、x86 预设不能直接搭配该 SDK；需要时先按
+预编译 Ela SDK 配套。预设仅提供 x64 Release，避免 Visual Studio 继续选中
+未配置依赖的旧 Debug、x86 配置；需要其他架构或 Debug SDK 时先按
 [Ela SDK 说明](third_party/ElaWidgetTools/README.md) 重建配套库。
 
 ## 依赖
@@ -30,6 +31,8 @@ Qt 目录应包含 `bin`、`lib/cmake/Qt5` 和 `plugins`；vcpkg 目录应包含
 `scripts/buildsystems/vcpkg.cmake` 以及已安装的依赖。
 本机预设已加入 `.gitignore`，个人绝对路径不会提交到仓库。
 也可以设置这两个环境变量后，直接使用共享的 `x64-release` 预设。
+共享预设在缺少这些环境变量时不显示；本机预设读取自己的路径配置后才会显示，
+避免误选未配置的预设。
 
 ## Visual Studio
 
